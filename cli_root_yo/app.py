@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import traceback
 from datetime import datetime, timezone
 
 import typer
@@ -91,24 +92,31 @@ def run(spec: CliSpec, argv: list[str] | None = None) -> int:
     """Execute the CLI and return an exit code. MUST NOT call sys.exit()."""
     _reset()  # ensure clean context for this invocation
 
+    # Determine debug mode from environment (§6.6)
+    debug = os.environ.get("CLI_ROOT_YO_DEBUG") == "1"
+
     try:
         app = create_app(spec)
         xdg_paths = app._cli_root_yo_xdg_paths  # type: ignore[attr-defined]
 
-        # Determine json_mode and debug from argv before Typer parses
+        # Determine json_mode from argv before Typer parses
         args = argv if argv is not None else sys.argv[1:]
         json_mode = "--json" in args or "-j" in args
 
-        initialize(spec, xdg_paths, json_mode=json_mode)
+        initialize(spec, xdg_paths, json_mode=json_mode, debug=debug)
 
         app(args, standalone_mode=False)
         return 0
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 0
     except CliRootYoError as exc:
+        if debug:
+            traceback.print_exc(file=sys.stderr)
         output.error(str(exc))
         return exc.exit_code
     except Exception as exc:
+        if debug:
+            traceback.print_exc(file=sys.stderr)
         output.error(f"Unexpected error: {exc}")
         return 1
 
