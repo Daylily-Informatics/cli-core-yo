@@ -121,6 +121,25 @@ This adds `config path|init|show|validate|edit|reset` and `env status|activate|d
 | `CliSpec`, `ConfigSpec`, `EnvSpec`, `PluginSpec`, `XdgSpec` | `cli_core_yo.spec` | Frozen dataclass specs |
 | `output.*` | `cli_core_yo.output` | UX primitives + `emit_json()` |
 
+## HTTPS Certificate Resolution
+
+`cli_core_yo.certs` now supports a shared HTTPS resolution contract for downstream
+services. The `resolve_https_certs()` helper applies this precedence order:
+
+1. explicit CLI-provided cert and key paths
+2. generic `SSL_CERT_FILE` / `SSL_KEY_FILE`
+3. service-specific legacy env vars supplied by the caller
+4. an existing shared certificate directory
+5. an existing repo-local fallback certificate directory
+6. optional `mkcert` generation, preferring the shared directory
+
+For Dayhoff-managed local deployments, `shared_dayhoff_certs_dir(deploy_name)`
+resolves the canonical shared directory under XDG state:
+
+```text
+~/.local/state/dayhoff/<deploy-name>/certs/
+```
+
 ## Exit Codes
 
 | Code | Meaning |
