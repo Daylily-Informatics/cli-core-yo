@@ -40,6 +40,8 @@ Issues = "https://github.com/Daylily-Informatics/cli-core-yo/issues"
 
 [project.optional-dependencies]
 dev = [
+    "bandit[toml]>=1.8.0",
+    "pre-commit>=3.8.0",
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.4.0",
@@ -64,6 +66,11 @@ line-length = 99
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 
+[tool.bandit]
+targets = ["cli_core_yo"]
+exclude_dirs = ["tests", "dist", "build"]
+skips = ["B101", "B105", "B404", "B603", "B607"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --tb=short"
@@ -73,4 +80,3 @@ python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
-
