@@ -123,21 +123,27 @@ def validate_cognito_app_client(
 
     errors.extend(
         validate_uri_list_ports(
-            uris=callback_urls, label="CallbackURLs",
-            expected_port=expected_port, runtime_host=runtime_host,
+            uris=callback_urls,
+            label="CallbackURLs",
+            expected_port=expected_port,
+            runtime_host=runtime_host,
         )
     )
     errors.extend(
         validate_uri_list_ports(
-            uris=logout_urls, label="LogoutURLs",
-            expected_port=expected_port, runtime_host=runtime_host,
+            uris=logout_urls,
+            label="LogoutURLs",
+            expected_port=expected_port,
+            runtime_host=runtime_host,
         )
     )
     if default_redirect_uri:
         errors.extend(
             validate_uri_list_ports(
-                uris=[default_redirect_uri], label="DefaultRedirectURI",
-                expected_port=expected_port, runtime_host=runtime_host,
+                uris=[default_redirect_uri],
+                label="DefaultRedirectURI",
+                expected_port=expected_port,
+                runtime_host=runtime_host,
             )
         )
 
@@ -153,9 +159,7 @@ def validate_cognito_app_client(
         )
     if normalized_expected_logout not in normalized_logouts:
         errors.append(
-            f"Expected logout URI is not configured in Cognito app client: "
-            f"{expected_logout_url}"
+            f"Expected logout URI is not configured in Cognito app client: {expected_logout_url}"
         )
 
     return errors
-

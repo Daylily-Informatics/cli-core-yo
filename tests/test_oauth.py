@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from cli_core_yo.oauth import (
     default_port_for_scheme,
     is_local_oauth_uri,
@@ -13,7 +11,6 @@ from cli_core_yo.oauth import (
     validate_cognito_app_client,
     validate_uri_list_ports,
 )
-
 
 # -- runtime_oauth_host -------------------------------------------------------
 
@@ -128,9 +125,12 @@ class TestValidateUriListPorts:
 
     def test_unsupported_scheme_flagged(self):
         errors = validate_uri_list_ports(
-            uris=["ftp://localhost/path"], label="Test",
-            expected_port=80, runtime_host="localhost",
+            uris=["ftp://localhost/path"],
+            label="Test",
+            expected_port=80,
+            runtime_host="localhost",
         )
+        assert any("unsupported URI scheme" in e for e in errors)
 
 
 # -- validate_cognito_app_client -----------------------------------------------
@@ -146,7 +146,9 @@ def _make_app_client(
     return {
         "ClientName": name,
         "AllowedOAuthFlowsUserPoolClient": oauth_enabled,
-        "CallbackURLs": ["https://localhost:8912/auth/callback"] if callbacks is None else callbacks,
+        "CallbackURLs": (
+            ["https://localhost:8912/auth/callback"] if callbacks is None else callbacks
+        ),
         "LogoutURLs": ["https://localhost:8912/"] if logouts is None else logouts,
         "DefaultRedirectURI": default_redirect,
     }
@@ -221,9 +223,7 @@ class TestValidateCognitoAppClient:
 
     def test_port_mismatch_in_callbacks(self):
         errors = validate_cognito_app_client(
-            app_client=_make_app_client(
-                callbacks=["https://localhost:9999/auth/callback"]
-            ),
+            app_client=_make_app_client(callbacks=["https://localhost:9999/auth/callback"]),
             expected_callback_url="https://localhost:9999/auth/callback",
             expected_logout_url="https://localhost:8912/",
             expected_port=8912,
@@ -234,15 +234,18 @@ class TestValidateCognitoAppClient:
 
     def test_port_mismatch_flagged(self):
         errors = validate_uri_list_ports(
-            uris=["https://localhost:9999/cb"], label="Test",
-            expected_port=8912, runtime_host="localhost",
+            uris=["https://localhost:9999/cb"],
+            label="Test",
+            expected_port=8912,
+            runtime_host="localhost",
         )
         assert any("port mismatch" in e for e in errors)
 
     def test_remote_uri_skipped(self):
         errors = validate_uri_list_ports(
-            uris=["https://example.com:9999/cb"], label="Test",
-            expected_port=8912, runtime_host="localhost",
+            uris=["https://example.com:9999/cb"],
+            label="Test",
+            expected_port=8912,
+            runtime_host="localhost",
         )
         assert errors == []
-
