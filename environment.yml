@@ -1,1 +1,10 @@
-cli_core_yo_env.yaml
+name: CLI_CORE_YO-local
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - setuptools<81
+  - pip:
+      - -e .[dev]
