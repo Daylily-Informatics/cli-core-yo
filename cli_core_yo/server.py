@@ -11,9 +11,8 @@ import os
 import signal
 import subprocess
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
-
 
 # -- PID helpers ----------------------------------------------------------------
 
@@ -46,7 +45,7 @@ def write_pid(pid_file: Path, pid: int) -> None:
 def new_log_path(log_dir: Path, prefix: str = "server") -> Path:
     """Return a timestamped log file path under *log_dir*."""
     log_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return log_dir / f"{prefix}_{ts}.log"
 
 

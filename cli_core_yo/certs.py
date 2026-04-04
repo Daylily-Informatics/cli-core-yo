@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -91,8 +92,7 @@ def ensure_certs(
     mkcert_bin = shutil.which("mkcert")
     if not mkcert_bin:
         raise SystemExit(
-            "mkcert is required to generate localhost HTTPS certificates. "
-            "Install it and retry."
+            "mkcert is required to generate localhost HTTPS certificates. Install it and retry."
         )
 
     # Install local CA (idempotent)
@@ -107,8 +107,10 @@ def ensure_certs(
         subprocess.run(
             [
                 mkcert_bin,
-                "-cert-file", str(cert_file),
-                "-key-file", str(key_file),
+                "-cert-file",
+                str(cert_file),
+                "-key-file",
+                str(key_file),
                 *hosts,
             ],
             check=True,
@@ -117,14 +119,10 @@ def ensure_certs(
         )
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()
-        raise SystemExit(
-            f"Failed to generate HTTPS certificates with mkcert: {stderr}"
-        )
+        raise SystemExit(f"Failed to generate HTTPS certificates with mkcert: {stderr}")
 
     if not (cert_file.exists() and key_file.exists()):
-        raise SystemExit(
-            f"mkcert did not produce {CERT_FILENAME}/{KEY_FILENAME} in {certs_dir}"
-        )
+        raise SystemExit(f"mkcert did not produce {CERT_FILENAME}/{KEY_FILENAME} in {certs_dir}")
     return cert_file, key_file
 
 
@@ -140,7 +138,7 @@ class ResolvedHttpsCerts:
 def shared_dayhoff_certs_dir(
     deploy_name: str,
     *,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
     home: Path | None = None,
 ) -> Path:
     """Return the shared Dayhoff deployment-scoped certificate directory."""
@@ -158,7 +156,7 @@ def resolve_https_certs(
     *,
     cert_path: str | Path | None = None,
     key_path: str | Path | None = None,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
     legacy_cert_env_vars: tuple[str, ...] = (),
     legacy_key_env_vars: tuple[str, ...] = (),
     shared_certs_dir: str | Path | None = None,
@@ -243,7 +241,7 @@ def _resolve_explicit_pair(
 
 
 def _resolve_env_pair(
-    env: dict[str, str],
+    env: Mapping[str, str],
     *,
     cert_env_vars: tuple[str, ...],
     key_env_vars: tuple[str, ...],
@@ -257,13 +255,12 @@ def _resolve_env_pair(
         cert_names = ", ".join(cert_env_vars) or "<none>"
         key_names = ", ".join(key_env_vars) or "<none>"
         raise SystemExit(
-            f"{source} must provide both a cert path ({cert_names}) "
-            f"and a key path ({key_names})."
+            f"{source} must provide both a cert path ({cert_names}) and a key path ({key_names})."
         )
     return Path(cert_value).expanduser(), Path(key_value).expanduser()
 
 
-def _first_env_value(env: dict[str, str], names: tuple[str, ...]) -> str | None:
+def _first_env_value(env: Mapping[str, str], names: tuple[str, ...]) -> str | None:
     for name in names:
         value = env.get(name, "").strip()
         if value:
