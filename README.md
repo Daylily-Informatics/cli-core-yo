@@ -4,169 +4,367 @@
 [![GitHub Tag](https://img.shields.io/github/v/tag/Daylily-Informatics/cli-core-yo?style=flat-square&label=tag)](https://github.com/Daylily-Informatics/cli-core-yo/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
-Reusable CLI kernel for building unified command-line interfaces with consistent behavior, output style, help, and extension semantics. Built on [Typer](https://typer.tiangolo.com/) + [Rich](https://rich.readthedocs.io/).
+Reusable CLI framework layer for downstream Python CLIs built on Typer and Rich.
 
-## What It Does
+## What This Library Is
 
-`cli-core-yo` provides the shared foundation that downstream CLI tools build on:
+`cli-core-yo` is the shared command-line kernel that downstream repositories embed into their own CLI entrypoints. It is responsible for consistent command-tree construction, built-in framework commands, output conventions, runtime context, plugin loading, and XDG path resolution.
 
-- **Root app factory** — `create_app()` builds a fully configured Typer app from a declarative spec
-- **Built-in commands** — `version`, `info`, and optional `config`/`env` groups
-- **Plugin system** — explicit callables + `cli_core_yo.plugins` entry-point discovery
-- **XDG paths** — platform-aware config/data/state/cache directory resolution (macOS + Linux)
-- **Output primitives** — `heading`, `success`, `warning`, `error`, `action`, `detail`, `bullet`, `emit_json`
-- **Runtime context** — immutable singleton accessible to all commands during invocation
-- **JSON mode** — `--json`/`-j` flag with deterministic output (indent=2, sorted keys, no ANSI)
-- **NO_COLOR** — respects the [NO_COLOR](https://no-color.org/) convention
-- **Debug mode** — `CLI_CORE_YO_DEBUG=1` prints tracebacks to STDERR
+It is not a standalone service CLI and it is not the place for downstream business logic. Downstream repos should define one immutable `CliSpec`, extend the command tree through the registry/plugin interfaces, and keep domain behavior outside this package.
 
-## Prerequisites
+## What You Get Out Of The Box
 
-- Python 3.10+
-- pip
+- A root app factory via `create_app(spec)` and an execution entrypoint via `run(spec, argv=None)`.
+- Built-in root commands: `version` and `info`.
+- Optional built-in groups: `config` and `env`.
+- Deterministic plugin loading:
+  explicit plugin callables first, entry-point plugins second.
+- An immutable runtime context exposed through `get_context()`.
+- Consistent human output primitives in `cli_core_yo.output`.
+- Deterministic JSON emission for commands that explicitly expose `--json` / `-j`.
+- XDG config/data/state/cache directory resolution with Linux and macOS defaults.
+- `NO_COLOR` support for human output and `CLI_CORE_YO_DEBUG=1` traceback mode.
+- Secondary helper modules for cert resolution, OAuth URI validation, server lifecycle helpers, and direct XDG path access.
 
-## Installation
+## Quick Start
+
+Install the package:
 
 ```bash
 pip install cli-core-yo
 ```
 
-For development:
-
-```bash
-git clone https://github.com/Daylily-Informatics/cli-core-yo.git
-cd cli-core-yo
-pip install -e ".[dev]"
-```
-
-## Quick Start
+Define one `CliSpec` and route process exit through `run()`:
 
 ```python
-from cli_core_yo.spec import CliSpec, XdgSpec
 from cli_core_yo.app import run
+from cli_core_yo.spec import CliSpec, XdgSpec
 
-spec = CliSpec(
+SPEC = CliSpec(
     prog_name="my-tool",
     app_display_name="My Tool",
     dist_name="my-tool",
-    root_help="A CLI built with cli-core-yo.",
-    xdg=XdgSpec(vendor="my-tool"),
+    root_help="Unified CLI for My Tool.",
+    xdg=XdgSpec(app_dir_name="my-tool"),
 )
 
-exit_code = run(spec)
+raise SystemExit(run(SPEC))
 ```
 
-This gives you `my-tool version`, `my-tool info`, `my-tool --help`, `--json` support, and all the standard behaviors out of the box.
+That gives the downstream CLI a root Typer app with:
 
-## Adding Commands via Plugin
+- `my-tool version`
+- `my-tool info`
+- Typer/Rich help output
+- XDG path initialization
+- runtime context initialization
+
+If you need the Typer app object directly, use `create_app(spec)` instead of `run()`:
 
 ```python
-# my_tool/plugin.py
-def register(registry, spec):
-    registry.add_command(None, "greet", greet_cmd, help_text="Say hello.")
+from cli_core_yo.app import create_app
 
-def greet_cmd():
-    from cli_core_yo import output
-    output.success("Hello, world!")
+app = create_app(SPEC)
 ```
 
-Register it in your spec:
+### Core API
+
+| Symbol | Purpose |
+| --- | --- |
+| `create_app(spec)` | Build and return the configured Typer app. |
+| `run(spec, argv=None)` | Execute the CLI and return an integer exit code without calling `sys.exit()`. |
+| `CommandRegistry` | Register commands, groups, and Typer sub-apps in a deterministic tree. |
+| `get_context()` | Access the current invocation's immutable runtime context. |
+| `output.*` | Emit human output or deterministic JSON. |
+| `resolve_paths()` / `XdgPaths` | Resolve app-scoped config/data/state/cache directories. |
+
+### Spec Objects
+
+`CliSpec` is the top-level immutable configuration passed into `create_app()` or `run()`.
+
+| Dataclass | Current fields |
+| --- | --- |
+| `XdgSpec` | `app_dir_name` |
+| `ConfigSpec` | `primary_filename`, `template_bytes`, `template_resource`, `validator` |
+| `EnvSpec` | `active_env_var`, `project_root_env_var`, `activate_script_name`, `deactivate_script_name` |
+| `PluginSpec` | `explicit`, `entry_points` |
+| `CliSpec` | `prog_name`, `app_display_name`, `dist_name`, `root_help`, `xdg`, `config`, `env`, `plugins`, `info_hooks` |
+
+`ConfigSpec` requires exactly one template source:
+`template_bytes` or `template_resource`.
+
+## Extension Model
+
+The supported extension path is:
+
+1. define a `CliSpec`
+2. register downstream commands through `CommandRegistry`
+3. load that registration through explicit plugins or entry points
+
+Do not mutate the root Typer app ad hoc in downstream repos when this library is the framework layer.
+
+### Plugin Signature
+
+Plugin callables must have this shape:
+
+```python
+from cli_core_yo.registry import CommandRegistry
+from cli_core_yo.spec import CliSpec
+
+
+def register(registry: CommandRegistry, spec: CliSpec) -> None:
+    ...
+```
+
+Example explicit plugin:
+
+```python
+from cli_core_yo import output
+from cli_core_yo.registry import CommandRegistry
+from cli_core_yo.spec import CliSpec
+
+
+def greet() -> None:
+    output.success("hello")
+
+
+def register(registry: CommandRegistry, spec: CliSpec) -> None:
+    registry.add_command(None, "greet", greet, help_text="Say hello.")
+```
+
+Wire it into the spec:
 
 ```python
 from cli_core_yo.spec import PluginSpec
 
-spec = CliSpec(
-    ...,
+SPEC = CliSpec(
+    prog_name="my-tool",
+    app_display_name="My Tool",
+    dist_name="my-tool",
+    root_help="Unified CLI for My Tool.",
+    xdg=XdgSpec(app_dir_name="my-tool"),
     plugins=PluginSpec(explicit=["my_tool.plugin.register"]),
 )
 ```
 
-Or via entry points in `pyproject.toml`:
+Or expose it as a package entry point:
 
 ```toml
 [project.entry-points."cli_core_yo.plugins"]
 my-tool = "my_tool.plugin:register"
 ```
 
-## Config & Env Groups
+### Load Order And Registry Rules
 
-Enable optional built-in command groups by providing specs:
+- `spec.plugins.explicit` loads first, in list order.
+- `spec.plugins.entry_points` loads second, in list order.
+- Entry-point group name is `cli_core_yo.plugins`.
+- Root reserved names are `version` and `info`, plus `config` and `env` when those built-ins are enabled.
+- Command and group names must match `^[a-z][a-z0-9-]*$`.
+- `CommandRegistry` is frozen before application to the Typer tree; post-freeze mutation raises framework errors.
+
+`CommandRegistry` supports:
+
+- `add_group(name, help_text="", order=None)`
+- `add_command(group_path, name, callback, help_text="", order=None)`
+- `add_typer_app(group_path, typer_app, name, help_text="", order=None)`
+
+Use `group_path=None` for root-level commands. Nested paths use slash-separated group paths such as `"admin/users"`.
+
+## Optional Built-Ins
+
+### `config`
+
+Enable the config group by supplying a `ConfigSpec`:
 
 ```python
-from cli_core_yo.spec import ConfigSpec, EnvSpec
+from cli_core_yo.spec import CliSpec, ConfigSpec, XdgSpec
 
-spec = CliSpec(
-    ...,
+SPEC = CliSpec(
+    prog_name="my-tool",
+    app_display_name="My Tool",
+    dist_name="my-tool",
+    root_help="Unified CLI for My Tool.",
+    xdg=XdgSpec(app_dir_name="my-tool"),
     config=ConfigSpec(
         primary_filename="config.json",
-        template_bytes=b'{"key": "value"}\n',
-    ),
-    env=EnvSpec(
-        env_dir_name=".venv",
-        activate_script_rel="bin/activate",
+        template_bytes=b'{"env": "dev"}\n',
     ),
 )
 ```
 
-This adds `config path|init|show|validate|edit|reset` and `env status|activate|deactivate|reset`.
+Built-in subcommands:
 
-## Public API
+- `config path`
+- `config init`
+- `config show`
+- `config validate`
+- `config edit`
+- `config reset`
 
-| Symbol | Module | Description |
-|--------|--------|-------------|
-| `create_app(spec)` | `cli_core_yo.app` | Build a Typer app from a CliSpec |
-| `run(spec, argv)` | `cli_core_yo.app` | Execute CLI, return exit code (never calls `sys.exit()`) |
-| `CommandRegistry` | `cli_core_yo.registry` | Register commands/groups with ordering and conflict detection |
-| `get_context()` | `cli_core_yo.runtime` | Access the current invocation's RuntimeContext |
-| `CliSpec`, `ConfigSpec`, `EnvSpec`, `PluginSpec`, `XdgSpec` | `cli_core_yo.spec` | Frozen dataclass specs |
-| `output.*` | `cli_core_yo.output` | UX primitives + `emit_json()` |
+Behavior notes:
 
-## HTTPS Certificate Resolution
+- `config init` writes the configured template and supports `--force`.
+- `config validate` calls `validator(content)` when provided; otherwise it accepts the config.
+- `config edit` shells out to `VISUAL`, `EDITOR`, or `vi` and requires an interactive terminal.
+- `config reset` backs up the current file to a UTC timestamped `.bak` before rewriting the template.
 
-`cli_core_yo.certs` now supports a shared HTTPS resolution contract for downstream
-services. The `resolve_https_certs()` helper applies this precedence order:
+### `env`
 
-1. explicit CLI-provided cert and key paths
-2. generic `SSL_CERT_FILE` / `SSL_KEY_FILE`
-3. service-specific legacy env vars supplied by the caller
-4. an existing shared certificate directory
-5. an existing repo-local fallback certificate directory
-6. optional `mkcert` generation, preferring the shared directory
+Enable the env group by supplying an `EnvSpec`:
 
-For Dayhoff-managed local deployments, `shared_dayhoff_certs_dir(deploy_name)`
-resolves the canonical shared directory under XDG state:
+```python
+from cli_core_yo.spec import CliSpec, EnvSpec, XdgSpec
 
-```text
-~/.local/state/dayhoff/<deploy-name>/certs/
+SPEC = CliSpec(
+    prog_name="my-tool",
+    app_display_name="My Tool",
+    dist_name="my-tool",
+    root_help="Unified CLI for My Tool.",
+    xdg=XdgSpec(app_dir_name="my-tool"),
+    env=EnvSpec(
+        active_env_var="MY_TOOL_ACTIVE",
+        project_root_env_var="MY_TOOL_ROOT",
+        activate_script_name="activate.sh",
+        deactivate_script_name="deactivate.sh",
+    ),
+)
 ```
 
-## Exit Codes
+Built-in subcommands:
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Domain/runtime failure |
-| 2 | Usage error (bad args, unknown command) |
-| 130 | SIGINT |
+- `env status`
+- `env activate`
+- `env deactivate`
+- `env reset`
 
-## Build / Test / Lint
+Behavior notes:
+
+- `env status` reports environment status from the configured env vars.
+- `env activate`, `env deactivate`, and `env reset` print shell commands; they do not mutate the caller's shell environment.
+
+## Runtime And Output Contract
+
+Use `get_context()` inside commands and plugins when you need invocation-scoped state:
+
+```python
+from cli_core_yo.runtime import get_context
+
+
+def show_runtime() -> None:
+    ctx = get_context()
+    print(ctx.spec.prog_name)
+    print(ctx.xdg_paths.config)
+    print(ctx.json_mode)
+    print(ctx.debug)
+```
+
+`RuntimeContext` contains:
+
+- `spec`
+- `xdg_paths`
+- `json_mode`
+- `debug`
+
+For user-facing output, use `cli_core_yo.output` instead of raw ANSI formatting:
+
+- `heading(title)`
+- `success(msg)`
+- `warning(msg)`
+- `error(msg)`
+- `action(msg)`
+- `detail(msg)`
+- `bullet(msg)`
+- `print_text(msg)`
+- `emit_json(data)`
+
+Important behavior:
+
+- Human primitives are automatically suppressed when runtime JSON mode is enabled.
+- `emit_json()` writes deterministic JSON:
+  sorted keys, `indent=2`, UTF-8 passthrough, trailing newline, and no ANSI.
+- `NO_COLOR=1` disables ANSI styling in human output.
+- `CLI_CORE_YO_DEBUG=1` enables traceback printing for framework exceptions.
+- `run()` returns exit codes instead of raising `SystemExit` itself.
+
+JSON support is command-specific, not universal. In the core library, `version` and `info` expose `--json` / `-j`. Commands that do not declare JSON flags will treat `--json` as a usage error.
+
+Practical exit code expectations:
+
+- `0` for success
+- `1` for framework/domain failures
+- `2` for Typer/Click usage errors such as unknown commands or invalid options
+
+## Secondary Helper Modules
+
+These modules are public and useful, but they are secondary to the CLI-kernel story.
+
+### `cli_core_yo.xdg`
+
+Use this when you need direct access to resolved app directories outside normal command execution.
+
+- `resolve_paths(xdg_spec)` returns `XdgPaths(config, data, state, cache)`.
+- Directories are created automatically.
+- Linux defaults use `~/.config`, `~/.local/share`, `~/.local/state`, and `~/.cache`.
+- macOS defaults use `~/.config`, `~/Library/Application Support`, `~/Library/Logs`, and `~/Library/Caches`.
+
+### `cli_core_yo.certs`
+
+Use this for local HTTPS cert management in downstream service CLIs.
+
+- `ensure_certs(certs_dir)` ensures `cert.pem` and `key.pem`, generating them with `mkcert` when needed.
+- `resolve_https_certs(...)` resolves cert/key paths by precedence:
+  explicit paths, generic SSL env vars, caller-supplied legacy env vars, shared dir, fallback dir, then optional generation.
+- `shared_dayhoff_certs_dir(deploy_name)` resolves the Dayhoff shared cert directory under XDG state.
+- `cert_status(certs_dir)` reports readiness and mkcert/CA status.
+
+### `cli_core_yo.oauth`
+
+Use this for pure URI validation logic around local OAuth/Cognito flows.
+
+- No I/O
+- No AWS calls
+- Port-alignment and expected-URL validation helpers for app-client configuration
+
+### `cli_core_yo.server`
+
+Use this for service-style CLIs that need small process-management helpers.
+
+- PID file helpers
+- timestamped log-file helpers
+- process stop helpers
+- `.env` sourcing
+- user-facing host display normalization
+
+## Development
+
+Bootstrap a local development environment from the repo root:
 
 ```bash
-# Run tests
-python -m pytest tests/ -v --cov=cli_core_yo
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
 
-# Lint + format check
+Validation commands used by this repo:
+
+```bash
+python -m pytest tests/ -v --cov=cli_core_yo
 ruff check cli_core_yo tests
 ruff format --check cli_core_yo tests
-
-# Type check
 mypy cli_core_yo --ignore-missing-imports
-
-# Build distribution
 python -m build
 twine check dist/*
 ```
 
+The package requires Python 3.10+.
+
+## Reference
+
+Use [`SPEC.md`](SPEC.md) as the formal contract for framework behavior.
+
+Use the tests in [`tests/`](tests/) as the executable compatibility surface. When documentation and assumptions diverge, the code and tests win.
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [`LICENSE`](LICENSE).
