@@ -35,7 +35,7 @@ raise SystemExit(run(SPEC))
 ```
 
 If optional built-ins are needed:
-- `ConfigSpec`: provide `primary_filename` and exactly one of `template_bytes` or `template_resource`.
+- `ConfigSpec`: provide exactly one of `xdg_relative_path` or `absolute_path`, and exactly one of `template_bytes` or `template_resource`.
 - `EnvSpec`: provide `active_env_var`, `project_root_env_var`, `activate_script_name`, `deactivate_script_name`.
 
 ## Plugin and Registry Rules
@@ -75,7 +75,7 @@ Behavior guarantees:
 - `NO_COLOR` disables ANSI styling
 
 ## Runtime and Error Handling
-Use `cli_core_yo.runtime.get_context()` inside commands/plugins for invocation state.
+Use `cli_core_yo.runtime.get_context()` inside commands/plugins for invocation state, including the resolved `config_path` when config is enabled.
 Do not manually initialize runtime outside framework startup.
 
 `run()` returns exit codes and does not call `sys.exit()`.

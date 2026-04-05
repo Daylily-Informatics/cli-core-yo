@@ -14,6 +14,7 @@ import subprocess
 import sys
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
 
 import click
 import typer
@@ -54,6 +55,7 @@ def create_app(spec: CliSpec) -> typer.Typer:
 
     # Resolve XDG paths and initialize runtime
     xdg_paths = resolve_paths(spec.xdg)
+    config_path = _resolve_config_path(spec.config, xdg_paths)
 
     # Build reserved names from enabled optional groups
     reserved: set[str] = set()
@@ -70,7 +72,7 @@ def create_app(spec: CliSpec) -> typer.Typer:
 
     # Register optional built-in groups
     if spec.config is not None:
-        _register_config_group(registry, spec.config, xdg_paths)
+        _register_config_group(registry, spec.config, config_path)
     if spec.env is not None:
         _register_env_group(registry, spec.env, xdg_paths)
 
@@ -85,6 +87,7 @@ def create_app(spec: CliSpec) -> typer.Typer:
     app._cli_core_yo_registry = registry  # type: ignore[attr-defined]
     app._cli_core_yo_spec = spec  # type: ignore[attr-defined]
     app._cli_core_yo_xdg_paths = xdg_paths  # type: ignore[attr-defined]
+    app._cli_core_yo_config_path = config_path  # type: ignore[attr-defined]
 
     return app
 
@@ -99,12 +102,13 @@ def run(spec: CliSpec, argv: list[str] | None = None) -> int:
     try:
         app = create_app(spec)
         xdg_paths = app._cli_core_yo_xdg_paths  # type: ignore[attr-defined]
+        config_path = getattr(app, "_cli_core_yo_config_path", None)
 
         # Determine json_mode from argv before Typer parses
         args = argv if argv is not None else sys.argv[1:]
         json_mode = "--json" in args or "-j" in args
 
-        initialize(spec, xdg_paths, json_mode=json_mode, debug=debug)
+        initialize(spec, xdg_paths, config_path=config_path, json_mode=json_mode, debug=debug)
 
         app(args, standalone_mode=False)
         return 0
@@ -207,10 +211,11 @@ def _register_info(registry: CommandRegistry, spec: CliSpec, xdg_paths: XdgPaths
 
 
 def _register_config_group(
-    registry: CommandRegistry, config_spec: ConfigSpec, xdg_paths: XdgPaths
+    registry: CommandRegistry, config_spec: ConfigSpec, config_path: Path | None
 ) -> None:
     """Register built-in config subcommands (§4.6)."""
-    config_path = xdg_paths.config / config_spec.primary_filename
+    if config_path is None:
+        raise ValueError("config_path must be resolved when the config group is enabled.")
 
     registry._reserved.discard("config")
     registry.add_group("config", help_text="Configuration management.")
@@ -417,3 +422,14 @@ def _resolve_template(config_spec: ConfigSpec) -> bytes:
         ref = importlib.resources.files(pkg).joinpath(resource_name)
         return ref.read_bytes()
     raise ValueError("ConfigSpec has no template source")
+
+
+def _resolve_config_path(config_spec: ConfigSpec | None, xdg_paths: XdgPaths) -> Path | None:
+    """Resolve the single config file path for this invocation."""
+    if config_spec is None:
+        return None
+    if config_spec.xdg_relative_path is not None:
+        return xdg_paths.config / Path(config_spec.xdg_relative_path)
+    if config_spec.absolute_path is not None:
+        return Path(config_spec.absolute_path).expanduser()
+    raise ValueError("ConfigSpec has no location source")

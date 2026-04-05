@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from cli_core_yo.spec import (
@@ -42,35 +44,81 @@ class TestXdgSpec:
 
 
 class TestConfigSpec:
-    def test_with_template_bytes(self):
-        spec = ConfigSpec(primary_filename="config.json", template_bytes=b"{}")
+    def test_with_xdg_relative_path_and_template_bytes(self):
+        spec = ConfigSpec(xdg_relative_path="config.json", template_bytes=b"{}")
+        assert spec.xdg_relative_path == "config.json"
+        assert spec.absolute_path is None
         assert spec.template_bytes == b"{}"
         assert spec.template_resource is None
 
-    def test_with_template_resource(self):
+    def test_with_nested_xdg_relative_path_and_template_bytes(self):
+        spec = ConfigSpec(xdg_relative_path="profiles/dev/config.json", template_bytes=b"{}")
+        assert spec.xdg_relative_path == "profiles/dev/config.json"
+        assert spec.absolute_path is None
+
+    def test_with_absolute_path_and_template_resource(self):
         spec = ConfigSpec(
-            primary_filename="config.json",
+            absolute_path=Path("/tmp/config.json"),
             template_resource=("my_pkg", "default.json"),
         )
+        assert spec.absolute_path == Path("/tmp/config.json")
+        assert spec.xdg_relative_path is None
         assert spec.template_resource == ("my_pkg", "default.json")
         assert spec.template_bytes is None
 
-    def test_both_null_raises(self):
-        with pytest.raises(ValueError, match="Exactly one"):
-            ConfigSpec(primary_filename="config.json")
+    def test_location_both_null_raises(self):
+        with pytest.raises(ValueError, match="Exactly one of xdg_relative_path or absolute_path"):
+            ConfigSpec(template_bytes=b"{}")
 
-    def test_both_set_raises(self):
+    def test_location_both_set_raises(self):
+        with pytest.raises(ValueError, match="Exactly one of xdg_relative_path or absolute_path"):
+            ConfigSpec(
+                xdg_relative_path="config.json",
+                absolute_path="/tmp/config.json",
+                template_bytes=b"{}",
+            )
+
+    def test_template_both_null_raises(self):
+        with pytest.raises(ValueError, match="Exactly one"):
+            ConfigSpec(xdg_relative_path="config.json")
+
+    def test_template_both_set_raises(self):
         with pytest.raises(ValueError, match="Exactly one"):
             ConfigSpec(
-                primary_filename="config.json",
+                xdg_relative_path="config.json",
                 template_bytes=b"{}",
                 template_resource=("pkg", "res"),
             )
 
+    def test_xdg_relative_path_must_be_relative(self):
+        with pytest.raises(ValueError, match="xdg_relative_path must be relative"):
+            ConfigSpec(xdg_relative_path="/tmp/config.json", template_bytes=b"{}")
+
+    def test_xdg_relative_path_must_not_be_empty(self):
+        with pytest.raises(ValueError, match="xdg_relative_path must not be empty"):
+            ConfigSpec(xdg_relative_path="   ", template_bytes=b"{}")
+
+    def test_xdg_relative_path_rejects_parent_traversal(self):
+        with pytest.raises(ValueError, match="must not contain '..'"):
+            ConfigSpec(xdg_relative_path="../config.json", template_bytes=b"{}")
+
+    def test_absolute_path_must_be_absolute(self):
+        with pytest.raises(ValueError, match="absolute_path must be absolute"):
+            ConfigSpec(absolute_path="config.json", template_bytes=b"{}")
+
+    def test_absolute_path_must_not_be_empty(self):
+        with pytest.raises(ValueError, match="absolute_path must not be empty"):
+            ConfigSpec(absolute_path="   ", template_bytes=b"{}")
+
+    def test_absolute_path_may_use_tilde(self, monkeypatch, tmp_path: Path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        spec = ConfigSpec(absolute_path="~/config.json", template_bytes=b"{}")
+        assert spec.absolute_path == "~/config.json"
+
     def test_frozen(self):
-        spec = ConfigSpec(primary_filename="config.json", template_bytes=b"{}")
+        spec = ConfigSpec(xdg_relative_path="config.json", template_bytes=b"{}")
         with pytest.raises(AttributeError):
-            spec.primary_filename = "other"  # type: ignore[misc]
+            spec.xdg_relative_path = "other"  # type: ignore[misc]
 
 
 class TestEnvSpec:
@@ -125,7 +173,7 @@ class TestCliSpec:
             dist_name="my-app",
             root_help="Help.",
             xdg=XdgSpec(app_dir_name="myapp"),
-            config=ConfigSpec(primary_filename="cfg.json", template_bytes=b"{}"),
+            config=ConfigSpec(xdg_relative_path="cfg.json", template_bytes=b"{}"),
             env=EnvSpec(
                 active_env_var="A",
                 project_root_env_var="B",

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path, PurePath
 from typing import Callable
 
 # Regex for valid command/group names (§2.2)
@@ -24,14 +25,38 @@ class XdgSpec:
 class ConfigSpec:
     """Built-in config group configuration (§4.6)."""
 
-    primary_filename: str
+    xdg_relative_path: str | None = None
+    absolute_path: str | Path | None = None
     template_bytes: bytes | None = None
     template_resource: tuple[str, str] | None = None
     validator: Callable[[str], list[str]] | None = None
 
     def __post_init__(self) -> None:
+        has_relative = self.xdg_relative_path is not None
+        has_absolute = self.absolute_path is not None
         has_bytes = self.template_bytes is not None
         has_resource = self.template_resource is not None
+
+        if has_relative == has_absolute:
+            raise ValueError(
+                "Exactly one of xdg_relative_path or absolute_path must be non-null."
+            )
+
+        if self.xdg_relative_path is not None:
+            if not self.xdg_relative_path.strip():
+                raise ValueError("xdg_relative_path must not be empty.")
+            xdg_path = PurePath(self.xdg_relative_path)
+            if xdg_path.is_absolute():
+                raise ValueError("xdg_relative_path must be relative.")
+            if any(part == ".." for part in xdg_path.parts):
+                raise ValueError("xdg_relative_path must not contain '..'.")
+
+        if self.absolute_path is not None:
+            if not str(self.absolute_path).strip():
+                raise ValueError("absolute_path must not be empty.")
+            if not Path(self.absolute_path).expanduser().is_absolute():
+                raise ValueError("absolute_path must be absolute.")
+
         if has_bytes == has_resource:
             raise ValueError(
                 "Exactly one of template_bytes or template_resource must be non-null."

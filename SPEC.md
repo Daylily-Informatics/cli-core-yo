@@ -455,6 +455,9 @@ cli_core_yo/runtime.py
 Defines RuntimeContext dataclass.
 
 
+RuntimeContext includes the resolved config file path for the current invocation, or null when config is disabled.
+
+
 Owns runtime initialization and access:
 
 
@@ -599,6 +602,9 @@ cli_core_yo.runtime.get_context() -> RuntimeContext
 Returns the current invocation’s context.
 
 
+The returned context includes the resolved config file path for the invocation, or null when config is disabled.
+
+
 MUST raise a framework error if called before initialization.
 
 
@@ -631,7 +637,7 @@ Validate CliSpec (non-empty required fields, valid regex for names).
 Construct root Typer app (Section 3.4).
 
 
-Initialize RuntimeContext and store it in runtime.
+Initialize RuntimeContext and store it in runtime, including the resolved config file path when config is enabled.
 
 
 Register built-in commands:
@@ -853,10 +859,19 @@ Group help MUST list subcommands in registration order.
 If spec.config is not null, cli-core-yo MUST register config group with these subcommands:
 
 
+When config is enabled, cli-core-yo MUST resolve exactly one config file path per invocation.
+
+
+That resolved path MUST come from either `ConfigSpec.xdg_relative_path` under the resolved XDG config dir or `ConfigSpec.absolute_path`.
+
+
+All built-in config subcommands MUST operate on that same resolved config file path.
+
+
 config path
 
 
-Prints the resolved primary config file path.
+Prints the resolved config file path.
 
 
 Exit code 0.
@@ -867,7 +882,7 @@ Exit code 0.
 config init
 
 
-Creates the primary config file from the configured template content.
+Creates the config file at the resolved config path from the configured template content.
 
 
 If the config file exists and --force is not provided, MUST exit 1.
@@ -886,7 +901,7 @@ Options:
 config show
 
 
-Prints the config file contents to stdout.
+Prints the config file contents from the resolved config path to stdout.
 
 
 If the file does not exist, MUST exit 1.
@@ -922,7 +937,7 @@ If not interactive, MUST exit 1.
 config reset
 
 
-Replaces config file content with template content.
+Replaces config file content at the resolved config path with template content.
 
 
 MUST create a timestamped backup before overwriting.
@@ -944,7 +959,13 @@ Options:
 ConfigSpec MUST define:
 
 
-primary_filename (relative filename under XDG config dir)
+exactly one config location source:
+
+
+xdg_relative_path (relative path under XDG config dir, must not be absolute and must not contain `..`)
+
+
+OR absolute_path (absolute path)
 
 
 template_bytes OR template_resource (exactly one is non-null)
@@ -1232,6 +1253,9 @@ Python: sys.version.split()[0]
 
 
 Config Dir: XDG config dir path
+
+
+This row is directory-level metadata and does not imply the active config file is XDG-relative when `ConfigSpec.absolute_path` is used.
 
 
 Data Dir: XDG data dir path

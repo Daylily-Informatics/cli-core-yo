@@ -85,12 +85,15 @@ app = create_app(SPEC)
 | Dataclass | Current fields |
 | --- | --- |
 | `XdgSpec` | `app_dir_name` |
-| `ConfigSpec` | `primary_filename`, `template_bytes`, `template_resource`, `validator` |
+| `ConfigSpec` | `xdg_relative_path`, `absolute_path`, `template_bytes`, `template_resource`, `validator` |
 | `EnvSpec` | `active_env_var`, `project_root_env_var`, `activate_script_name`, `deactivate_script_name` |
 | `PluginSpec` | `explicit`, `entry_points` |
 | `CliSpec` | `prog_name`, `app_display_name`, `dist_name`, `root_help`, `xdg`, `config`, `env`, `plugins`, `info_hooks` |
 
-`ConfigSpec` requires exactly one template source:
+`ConfigSpec` requires exactly one location source:
+`xdg_relative_path` or `absolute_path`.
+
+`ConfigSpec` also requires exactly one template source:
 `template_bytes` or `template_resource`.
 
 ## Extension Model
@@ -187,7 +190,7 @@ SPEC = CliSpec(
     root_help="Unified CLI for My Tool.",
     xdg=XdgSpec(app_dir_name="my-tool"),
     config=ConfigSpec(
-        primary_filename="config.json",
+        xdg_relative_path="config.json",
         template_bytes=b'{"env": "dev"}\n',
     ),
 )
@@ -204,10 +207,12 @@ Built-in subcommands:
 
 Behavior notes:
 
+- The config file path is resolved once per invocation from either `xdg_relative_path` or `absolute_path`.
 - `config init` writes the configured template and supports `--force`.
 - `config validate` calls `validator(content)` when provided; otherwise it accepts the config.
 - `config edit` shells out to `VISUAL`, `EDITOR`, or `vi` and requires an interactive terminal.
 - `config reset` backs up the current file to a UTC timestamped `.bak` before rewriting the template.
+- Downstream commands and plugins can read the resolved file path from `get_context().config_path`.
 
 ### `env`
 
@@ -285,6 +290,7 @@ from cli_core_yo.runtime import get_context
 def show_runtime() -> None:
     ctx = get_context()
     print(ctx.spec.prog_name)
+    print(ctx.config_path)
     print(ctx.xdg_paths.config)
     print(ctx.json_mode)
     print(ctx.debug)
@@ -294,6 +300,7 @@ def show_runtime() -> None:
 
 - `spec`
 - `xdg_paths`
+- `config_path`
 - `json_mode`
 - `debug`
 

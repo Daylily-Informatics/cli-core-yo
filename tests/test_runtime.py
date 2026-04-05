@@ -39,6 +39,7 @@ class TestInitialize:
         assert isinstance(ctx, RuntimeContext)
         assert get_context() is ctx
         assert ctx.spec is dummy_spec
+        assert ctx.config_path is None
         assert ctx.json_mode is False
         assert ctx.debug is False
 
@@ -46,6 +47,11 @@ class TestInitialize:
         ctx = initialize(dummy_spec, dummy_paths, json_mode=True, debug=True)
         assert ctx.json_mode is True
         assert ctx.debug is True
+
+    def test_init_with_config_path(self, dummy_spec, dummy_paths, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        ctx = initialize(dummy_spec, dummy_paths, config_path=config_path)
+        assert ctx.config_path == config_path
 
     def test_double_init_raises(self, dummy_spec, dummy_paths):
         initialize(dummy_spec, dummy_paths)

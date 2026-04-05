@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.resources
 import json
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -36,7 +37,23 @@ def xdg_spec():
 @pytest.fixture
 def config_spec():
     return ConfigSpec(
-        primary_filename="config.json",
+        xdg_relative_path="config.json",
+        template_bytes=b'{"key": "value"}\n',
+    )
+
+
+@pytest.fixture
+def absolute_config_spec(tmp_path):
+    return ConfigSpec(
+        absolute_path=tmp_path / "absolute-config.json",
+        template_bytes=b'{"key": "value"}\n',
+    )
+
+
+@pytest.fixture
+def nested_relative_config_spec():
+    return ConfigSpec(
+        xdg_relative_path="profiles/dev/config.json",
         template_bytes=b'{"key": "value"}\n',
     )
 
@@ -73,6 +90,32 @@ def full_spec(xdg_spec, config_spec, env_spec):
         root_help="A test application.",
         xdg=xdg_spec,
         config=config_spec,
+        env=env_spec,
+    )
+
+
+@pytest.fixture
+def absolute_full_spec(xdg_spec, absolute_config_spec, env_spec):
+    return CliSpec(
+        prog_name="test-app",
+        app_display_name="Test App",
+        dist_name="cli-core-yo",
+        root_help="A test application.",
+        xdg=xdg_spec,
+        config=absolute_config_spec,
+        env=env_spec,
+    )
+
+
+@pytest.fixture
+def nested_relative_full_spec(xdg_spec, nested_relative_config_spec, env_spec):
+    return CliSpec(
+        prog_name="test-app",
+        app_display_name="Test App",
+        dist_name="cli-core-yo",
+        root_help="A test application.",
+        xdg=xdg_spec,
+        config=nested_relative_config_spec,
         env=env_spec,
     )
 
@@ -161,16 +204,17 @@ class TestHelpers:
         """ConfigSpec with neither source should raise (but __post_init__ prevents this)."""
         # We can only hit this if someone bypasses __post_init__
         spec = object.__new__(ConfigSpec)
+        object.__setattr__(spec, "xdg_relative_path", "x")
+        object.__setattr__(spec, "absolute_path", None)
         object.__setattr__(spec, "template_bytes", None)
         object.__setattr__(spec, "template_resource", None)
-        object.__setattr__(spec, "primary_filename", "x")
         object.__setattr__(spec, "validator", None)
         with pytest.raises(ValueError, match="no template source"):
             _resolve_template(spec)
 
     def test_resolve_template_resource(self, monkeypatch):
         config_spec = ConfigSpec(
-            primary_filename="config.json",
+            xdg_relative_path="config.json",
             template_resource=("fake_pkg", "template.json"),
         )
 
@@ -263,6 +307,14 @@ def _make_app(spec, tmp_path, monkeypatch):
     return create_app(spec)
 
 
+def _xdg_config_file(tmp_path: Path, relative_path: str = "config.json") -> Path:
+    return tmp_path / "config" / "test-app" / Path(relative_path)
+
+
+def _printed_path(text: str) -> Path:
+    return Path("".join(text.splitlines()))
+
+
 class TestVersionCommand:
     def test_version_human(self, minimal_spec, tmp_path, monkeypatch):
         app = _make_app(minimal_spec, tmp_path, monkeypatch)
@@ -334,13 +386,46 @@ class TestConfigGroup:
         app = _make_app(full_spec, tmp_path, monkeypatch)
         result = runner.invoke(app, ["config", "path"])
         assert result.exit_code == 0
-        assert "config.json" in result.output
+        assert _printed_path(result.output).resolve() == _xdg_config_file(tmp_path).resolve()
+
+    def test_config_path_absolute(self, absolute_full_spec, tmp_path, monkeypatch):
+        app = _make_app(absolute_full_spec, tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "path"])
+        assert result.exit_code == 0
+        printed_path = _printed_path(result.output)
+        assert printed_path.resolve() == (tmp_path / "absolute-config.json").resolve()
+
+    def test_config_path_nested_relative(self, nested_relative_full_spec, tmp_path, monkeypatch):
+        app = _make_app(nested_relative_full_spec, tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "path"])
+        assert result.exit_code == 0
+        assert _printed_path(result.output).resolve() == _xdg_config_file(
+            tmp_path, "profiles/dev/config.json"
+        ).resolve()
 
     def test_config_init_creates_file(self, full_spec, tmp_path, monkeypatch):
         app = _make_app(full_spec, tmp_path, monkeypatch)
         result = runner.invoke(app, ["config", "init"])
         assert result.exit_code == 0
-        config_file = tmp_path / "config" / "test-app" / "config.json"
+        config_file = _xdg_config_file(tmp_path)
+        assert config_file.exists()
+        assert config_file.read_bytes() == b'{"key": "value"}\n'
+
+    def test_config_init_creates_absolute_file(self, absolute_full_spec, tmp_path, monkeypatch):
+        app = _make_app(absolute_full_spec, tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "init"])
+        assert result.exit_code == 0
+        config_file = tmp_path / "absolute-config.json"
+        assert config_file.exists()
+        assert config_file.read_bytes() == b'{"key": "value"}\n'
+
+    def test_config_init_creates_nested_relative_directories(
+        self, nested_relative_full_spec, tmp_path, monkeypatch
+    ):
+        app = _make_app(nested_relative_full_spec, tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "init"])
+        assert result.exit_code == 0
+        config_file = _xdg_config_file(tmp_path, "profiles/dev/config.json")
         assert config_file.exists()
         assert config_file.read_bytes() == b'{"key": "value"}\n'
 
@@ -379,7 +464,7 @@ class TestConfigGroup:
 
     def test_config_validate_passes(self, xdg_spec, tmp_path, monkeypatch):
         config_spec = ConfigSpec(
-            primary_filename="config.json",
+            xdg_relative_path="config.json",
             template_bytes=b'{"ok": true}\n',
             validator=lambda content: [],  # no errors
         )
@@ -399,7 +484,7 @@ class TestConfigGroup:
 
     def test_config_validate_fails(self, xdg_spec, tmp_path, monkeypatch):
         config_spec = ConfigSpec(
-            primary_filename="config.json",
+            xdg_relative_path="config.json",
             template_bytes=b"bad",
             validator=lambda content: ["missing key", "bad format"],
         )
@@ -418,7 +503,7 @@ class TestConfigGroup:
 
     def test_config_validate_no_file(self, xdg_spec, tmp_path, monkeypatch):
         config_spec = ConfigSpec(
-            primary_filename="config.json",
+            xdg_relative_path="config.json",
             template_bytes=b"x",
             validator=lambda content: [],
         )
@@ -472,7 +557,10 @@ class TestConfigGroup:
                 return True
 
         monkeypatch.setattr("cli_core_yo.app.sys.stdin", FakeTTY())
-        monkeypatch.setattr("cli_core_yo.app.subprocess.run", lambda args: SimpleNamespace(returncode=3))
+        monkeypatch.setattr(
+            "cli_core_yo.app.subprocess.run",
+            lambda args: SimpleNamespace(returncode=3),
+        )
 
         with pytest.raises(SystemExit, match="1"):
             callback()
@@ -483,7 +571,7 @@ class TestConfigGroup:
     def test_config_reset_creates_backup(self, full_spec, tmp_path, monkeypatch):
         app = _make_app(full_spec, tmp_path, monkeypatch)
         runner.invoke(app, ["config", "init"])
-        config_dir = tmp_path / "config" / "test-app"
+        config_dir = _xdg_config_file(tmp_path).parent
         # Modify the file
         (config_dir / "config.json").write_text("modified")
         result = runner.invoke(app, ["config", "reset", "--yes"])
@@ -494,10 +582,12 @@ class TestConfigGroup:
         # Check reset to template
         assert (config_dir / "config.json").read_bytes() == b'{"key": "value"}\n'
 
-    def test_config_reset_aborts_when_confirmation_declined(self, full_spec, tmp_path, monkeypatch):
+    def test_config_reset_aborts_when_confirmation_declined(
+        self, full_spec, tmp_path, monkeypatch
+    ):
         app = _make_app(full_spec, tmp_path, monkeypatch)
         runner.invoke(app, ["config", "init"])
-        config_file = tmp_path / "config" / "test-app" / "config.json"
+        config_file = _xdg_config_file(tmp_path)
         config_file.write_text("modified", encoding="utf-8")
 
         monkeypatch.setattr("cli_core_yo.app.typer.confirm", lambda prompt: False)
@@ -506,6 +596,129 @@ class TestConfigGroup:
         assert result.exit_code == 0
         assert "aborted" in result.output.lower()
         assert config_file.read_text(encoding="utf-8") == "modified"
+
+    def test_absolute_path_mode_full_config_workflow(
+        self, xdg_spec, tmp_path, monkeypatch, capsys
+    ):
+        config_file = tmp_path / "absolute-config.json"
+        config_spec = ConfigSpec(
+            absolute_path=config_file,
+            template_bytes=b'{"name": "test"}\n',
+            validator=lambda content: [] if '"name"' in content else ["missing name"],
+        )
+        spec = CliSpec(
+            prog_name="test-app",
+            app_display_name="Test App",
+            dist_name="cli-core-yo",
+            root_help="A test.",
+            xdg=xdg_spec,
+            config=config_spec,
+        )
+        app = _make_app(spec, tmp_path, monkeypatch)
+
+        result = runner.invoke(app, ["config", "path"])
+        assert result.exit_code == 0
+        assert _printed_path(result.output).resolve() == config_file.resolve()
+
+        result = runner.invoke(app, ["config", "init"])
+        assert result.exit_code == 0
+        assert config_file.read_bytes() == b'{"name": "test"}\n'
+
+        result = runner.invoke(app, ["config", "show"])
+        assert result.exit_code == 0
+        assert '"name": "test"' in result.output
+
+        result = runner.invoke(app, ["config", "validate"])
+        assert result.exit_code == 0
+
+        callback = app._cli_core_yo_registry._roots["config"].children["edit"].callback
+
+        class FakeTTY:
+            @staticmethod
+            def isatty() -> bool:
+                return True
+
+        captured_args = []
+        monkeypatch.setattr("cli_core_yo.app.sys.stdin", FakeTTY())
+        monkeypatch.setattr(
+            "cli_core_yo.app.subprocess.run",
+            lambda args: captured_args.append(args) or SimpleNamespace(returncode=0),
+        )
+        callback()
+        assert captured_args == [["vi", str(config_file)]]
+        assert capsys.readouterr().out == ""
+
+        config_file.write_text('{"name": "modified"}', encoding="utf-8")
+        result = runner.invoke(app, ["config", "reset", "--yes"])
+        assert result.exit_code == 0
+        assert config_file.read_bytes() == b'{"name": "test"}\n'
+        bak_files = list(tmp_path.glob("absolute-config.*.bak"))
+        assert len(bak_files) == 1
+
+    def test_nested_relative_path_mode_full_config_workflow(self, xdg_spec, tmp_path, monkeypatch):
+        config_file = _xdg_config_file(tmp_path, "profiles/dev/config.json")
+        config_spec = ConfigSpec(
+            xdg_relative_path="profiles/dev/config.json",
+            template_bytes=b'{"name": "test"}\n',
+            validator=lambda content: [] if '"name"' in content else ["missing name"],
+        )
+        spec = CliSpec(
+            prog_name="test-app",
+            app_display_name="Test App",
+            dist_name="cli-core-yo",
+            root_help="A test.",
+            xdg=xdg_spec,
+            config=config_spec,
+        )
+        app = _make_app(spec, tmp_path, monkeypatch)
+
+        result = runner.invoke(app, ["config", "path"])
+        assert result.exit_code == 0
+        assert _printed_path(result.output).resolve() == config_file.resolve()
+
+        result = runner.invoke(app, ["config", "init"])
+        assert result.exit_code == 0
+        assert config_file.read_bytes() == b'{"name": "test"}\n'
+
+        result = runner.invoke(app, ["config", "show"])
+        assert result.exit_code == 0
+        assert '"name": "test"' in result.output
+
+        result = runner.invoke(app, ["config", "validate"])
+        assert result.exit_code == 0
+
+        config_file.write_text('{"name": "modified"}', encoding="utf-8")
+        result = runner.invoke(app, ["config", "reset", "--yes"])
+        assert result.exit_code == 0
+        assert config_file.read_bytes() == b'{"name": "test"}\n'
+        bak_files = list(config_file.parent.glob("config.*.bak"))
+        assert len(bak_files) == 1
+
+    def test_absolute_path_mode_expands_tilde(self, xdg_spec, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        config_file = tmp_path / "tilde-config.json"
+        config_spec = ConfigSpec(
+            absolute_path="~/tilde-config.json",
+            template_bytes=b'{"key": "value"}\n',
+        )
+        spec = CliSpec(
+            prog_name="test-app",
+            app_display_name="Test App",
+            dist_name="cli-core-yo",
+            root_help="A test.",
+            xdg=xdg_spec,
+            config=config_spec,
+        )
+        app = _make_app(spec, tmp_path, monkeypatch)
+
+        result = runner.invoke(app, ["config", "path"])
+        assert result.exit_code == 0
+        assert _printed_path(result.output).resolve() == config_file.resolve()
+
+        result = runner.invoke(app, ["config", "init"])
+        assert result.exit_code == 0
+        assert config_file.exists()
+        assert config_file.read_bytes() == b'{"key": "value"}\n'
 
 
 # ── Env group tests ─────────────────────────────────────────────────────────
@@ -591,6 +804,46 @@ class TestRun:
         )
         exit_code = run(bad_spec, ["version"])
         assert exit_code == 1
+
+    def test_run_initializes_runtime_with_config_path(self, xdg_spec, tmp_path, monkeypatch):
+        config_path = tmp_path / "explicit-config.json"
+        spec = CliSpec(
+            prog_name="test-app",
+            app_display_name="Test App",
+            dist_name="cli-core-yo",
+            root_help="A test.",
+            xdg=xdg_spec,
+            config=ConfigSpec(absolute_path=config_path, template_bytes=b"{}"),
+        )
+
+        class FakeApp:
+            _cli_core_yo_xdg_paths = object()
+            _cli_core_yo_config_path = config_path
+
+            def __call__(self, args, standalone_mode=False):
+                from cli_core_yo.runtime import get_context
+
+                assert get_context().config_path == config_path
+
+        monkeypatch.setattr("cli_core_yo.app.create_app", lambda spec: FakeApp())
+
+        assert run(spec, ["config", "path"]) == 0
+
+    def test_run_initializes_runtime_without_config_path_when_config_disabled(
+        self, minimal_spec, monkeypatch
+    ):
+        class FakeApp:
+            _cli_core_yo_xdg_paths = object()
+            _cli_core_yo_config_path = None
+
+            def __call__(self, args, standalone_mode=False):
+                from cli_core_yo.runtime import get_context
+
+                assert get_context().config_path is None
+
+        monkeypatch.setattr("cli_core_yo.app.create_app", lambda spec: FakeApp())
+
+        assert run(minimal_spec, ["version"]) == 0
 
     def test_run_non_integer_system_exit_returns_zero(self, minimal_spec, monkeypatch):
         class FakeApp:
@@ -963,7 +1216,7 @@ class TestConfigWorkflow:
 
     def test_full_config_lifecycle(self, xdg_spec, tmp_path, monkeypatch):
         config_spec = ConfigSpec(
-            primary_filename="config.json",
+            xdg_relative_path="config.json",
             template_bytes=b'{"name": "test"}\n',
             validator=lambda content: [] if '"name"' in content else ["missing name"],
         )

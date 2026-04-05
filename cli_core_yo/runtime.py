@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from cli_core_yo.errors import ContextNotInitializedError
 from cli_core_yo.spec import CliSpec
@@ -18,6 +19,7 @@ class RuntimeContext:
 
     spec: CliSpec
     xdg_paths: XdgPaths
+    config_path: Path | None = None
     json_mode: bool = False
     debug: bool = False
 
@@ -25,6 +27,7 @@ class RuntimeContext:
 def initialize(
     spec: CliSpec,
     xdg_paths: XdgPaths,
+    config_path: Path | None = None,
     json_mode: bool = False,
     debug: bool = False,
 ) -> RuntimeContext:
@@ -32,7 +35,13 @@ def initialize(
     global _context
     if _context is not None:
         raise RuntimeError("RuntimeContext is already initialized.")
-    _context = RuntimeContext(spec=spec, xdg_paths=xdg_paths, json_mode=json_mode, debug=debug)
+    _context = RuntimeContext(
+        spec=spec,
+        xdg_paths=xdg_paths,
+        config_path=config_path,
+        json_mode=json_mode,
+        debug=debug,
+    )
     return _context
 
 
