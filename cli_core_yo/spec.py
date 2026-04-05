@@ -18,8 +18,6 @@ class XdgSpec:
     """XDG Base Directory configuration."""
 
     app_dir_name: str
-    legacy_macos_config_dir: str | None = None
-    legacy_copy_files: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
