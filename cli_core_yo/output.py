@@ -18,16 +18,19 @@ _console: Console | None = None
 
 
 def _get_console() -> Console:
-    """Return a shared Console instance, respecting NO_COLOR."""
-    global _console
-    if _console is None:
-        no_color = "NO_COLOR" in os.environ
-        _console = Console(
-            highlight=False,
-            no_color=no_color,
-            stderr=False,
-        )
-    return _console
+    """Return a Console that writes to the *current* sys.stdout.
+
+    A fresh Console is created each call so that test harnesses (e.g.
+    Typer's CliRunner) that temporarily replace sys.stdout always
+    receive the output.
+    """
+    no_color = "NO_COLOR" in os.environ
+    return Console(
+        file=sys.stdout,
+        highlight=False,
+        no_color=no_color,
+        stderr=False,
+    )
 
 
 def _reset_console() -> None:
