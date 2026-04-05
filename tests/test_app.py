@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.resources
 import json
 import sys
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import typer
@@ -164,6 +167,25 @@ class TestHelpers:
         object.__setattr__(spec, "validator", None)
         with pytest.raises(ValueError, match="no template source"):
             _resolve_template(spec)
+
+    def test_resolve_template_resource(self, monkeypatch):
+        config_spec = ConfigSpec(
+            primary_filename="config.json",
+            template_resource=("fake_pkg", "template.json"),
+        )
+
+        class FakeResource:
+            def read_bytes(self):
+                return b'{"from": "resource"}\n'
+
+        class FakeFiles:
+            def joinpath(self, resource_name):
+                assert resource_name == "template.json"
+                return FakeResource()
+
+        monkeypatch.setattr(importlib.resources, "files", lambda pkg: FakeFiles())
+
+        assert _resolve_template(config_spec) == b'{"from": "resource"}\n'
 
 
 # ── create_app tests ────────────────────────────────────────────────────────
@@ -420,6 +442,44 @@ class TestConfigGroup:
         result = runner.invoke(app, ["config", "edit"])
         assert result.exit_code == 1
 
+    def test_config_edit_missing_file_in_tty(self, full_spec, tmp_path, monkeypatch, capsys):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        callback = app._cli_core_yo_registry._roots["config"].children["edit"].callback
+
+        class FakeTTY:
+            @staticmethod
+            def isatty() -> bool:
+                return True
+
+        monkeypatch.setattr("cli_core_yo.app.sys.stdin", FakeTTY())
+
+        with pytest.raises(SystemExit, match="1"):
+            callback()
+
+        out = capsys.readouterr().out
+        assert "not found" in out.lower()
+
+    def test_config_edit_editor_nonzero_exit_fails(
+        self, full_spec, tmp_path, monkeypatch, capsys
+    ):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        runner.invoke(app, ["config", "init"])
+        callback = app._cli_core_yo_registry._roots["config"].children["edit"].callback
+
+        class FakeTTY:
+            @staticmethod
+            def isatty() -> bool:
+                return True
+
+        monkeypatch.setattr("cli_core_yo.app.sys.stdin", FakeTTY())
+        monkeypatch.setattr("cli_core_yo.app.subprocess.run", lambda args: SimpleNamespace(returncode=3))
+
+        with pytest.raises(SystemExit, match="1"):
+            callback()
+
+        out = capsys.readouterr().out
+        assert "editor exited with code 3" in out.lower()
+
     def test_config_reset_creates_backup(self, full_spec, tmp_path, monkeypatch):
         app = _make_app(full_spec, tmp_path, monkeypatch)
         runner.invoke(app, ["config", "init"])
@@ -433,6 +493,19 @@ class TestConfigGroup:
         assert len(bak_files) == 1
         # Check reset to template
         assert (config_dir / "config.json").read_bytes() == b'{"key": "value"}\n'
+
+    def test_config_reset_aborts_when_confirmation_declined(self, full_spec, tmp_path, monkeypatch):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        runner.invoke(app, ["config", "init"])
+        config_file = tmp_path / "config" / "test-app" / "config.json"
+        config_file.write_text("modified", encoding="utf-8")
+
+        monkeypatch.setattr("cli_core_yo.app.typer.confirm", lambda prompt: False)
+
+        result = runner.invoke(app, ["config", "reset"])
+        assert result.exit_code == 0
+        assert "aborted" in result.output.lower()
+        assert config_file.read_text(encoding="utf-8") == "modified"
 
 
 # ── Env group tests ─────────────────────────────────────────────────────────
@@ -510,6 +583,36 @@ class TestRun:
         )
         exit_code = run(bad_spec, ["version"])
         assert exit_code == 1
+
+    def test_run_non_integer_system_exit_returns_zero(self, minimal_spec, monkeypatch):
+        class FakeApp:
+            _cli_core_yo_xdg_paths = object()
+
+            def __call__(self, args, standalone_mode=False):
+                raise SystemExit("done")
+
+        monkeypatch.setattr("cli_core_yo.app.create_app", lambda spec: FakeApp())
+
+        assert run(minimal_spec, ["version"]) == 0
+
+    def test_run_unexpected_exception_in_debug_mode_returns_one(self, minimal_spec, monkeypatch):
+        class FakeApp:
+            _cli_core_yo_xdg_paths = object()
+
+            def __call__(self, args, standalone_mode=False):
+                raise RuntimeError("boom")
+
+        errors = []
+        monkeypatch.setenv("CLI_CORE_YO_DEBUG", "1")
+        monkeypatch.setattr("cli_core_yo.app.create_app", lambda spec: FakeApp())
+        monkeypatch.setattr("cli_core_yo.app.output.error", lambda msg: errors.append(msg))
+
+        with patch("cli_core_yo.app.traceback.print_exc") as mock_print_exc:
+            code = run(minimal_spec, ["version"])
+
+        assert code == 1
+        assert errors == ["Unexpected error: boom"]
+        mock_print_exc.assert_called_once()
 
 
 # ── Integration Tests: Behavioral Equivalence (§7.4, Phase 6) ─────────────

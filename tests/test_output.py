@@ -149,3 +149,18 @@ class TestNoColor:
         out = capsys.readouterr().out
         # Should not contain ANSI escape sequences
         assert "\x1b[" not in out
+
+
+class TestCliOutputObject:
+    @pytest.mark.usefixtures("_init_context")
+    def test_ccyo_out_info_alias_uses_detail_output(self, capsys):
+        output.ccyo_out.info("hello")
+        out = capsys.readouterr().out
+        assert out.startswith("   ")
+        assert "hello" in out
+
+    @pytest.mark.usefixtures("_init_context")
+    def test_ccyo_out_exposes_emit_json(self, capsys):
+        output.ccyo_out.emit_json({"ok": True})
+        out = capsys.readouterr().out
+        assert json.loads(out) == {"ok": True}

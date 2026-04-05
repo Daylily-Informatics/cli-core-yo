@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -10,6 +12,12 @@ from cli_core_yo.certs import (
     CERT_FILENAME,
     KEY_FILENAME,
     ResolvedHttpsCerts,
+    ca_installed,
+    ca_root_path,
+    cert_status,
+    ensure_certs,
+    install_ca,
+    mkcert_available,
     resolve_https_certs,
     shared_dayhoff_certs_dir,
 )
@@ -196,3 +204,176 @@ class TestResolveHttpsCerts:
     def test_generation_without_configured_directory_fails_clearly(self):
         with pytest.raises(SystemExit, match="no certificate source was configured"):
             resolve_https_certs(generate_if_missing=True)
+
+    def test_missing_explicit_key_fails_clearly(self, tmp_path: Path):
+        cert_path = tmp_path / "cert.pem"
+        cert_path.write_text("cert", encoding="utf-8")
+
+        with pytest.raises(SystemExit, match="key file does not exist"):
+            resolve_https_certs(
+                cert_path=cert_path,
+                key_path=tmp_path / "missing-key.pem",
+            )
+
+
+class TestMkcertHelpers:
+    def test_mkcert_available_true_when_binary_found(self):
+        with patch("cli_core_yo.certs.shutil.which", return_value="/usr/bin/mkcert"):
+            assert mkcert_available() is True
+
+    def test_mkcert_available_false_when_missing(self):
+        with patch("cli_core_yo.certs.shutil.which", return_value=None):
+            assert mkcert_available() is False
+
+    def test_ca_installed_true_when_root_ca_exists(self, tmp_path: Path):
+        ca_root = tmp_path / "ca-root"
+        ca_root.mkdir()
+        (ca_root / "rootCA.pem").write_text("pem", encoding="utf-8")
+
+        completed = subprocess.CompletedProcess(
+            args=["mkcert", "-CAROOT"],
+            returncode=0,
+            stdout=f"{ca_root}\n",
+            stderr="",
+        )
+        with patch("cli_core_yo.certs.subprocess.run", return_value=completed):
+            assert ca_installed() is True
+
+    def test_ca_installed_false_on_nonzero_return(self):
+        completed = subprocess.CompletedProcess(
+            args=["mkcert", "-CAROOT"],
+            returncode=1,
+            stdout="",
+            stderr="bad",
+        )
+        with patch("cli_core_yo.certs.subprocess.run", return_value=completed):
+            assert ca_installed() is False
+
+    def test_ca_installed_false_when_mkcert_missing(self):
+        with patch("cli_core_yo.certs.subprocess.run", side_effect=FileNotFoundError):
+            assert ca_installed() is False
+
+    def test_ca_root_path_returns_path_on_success(self, tmp_path: Path):
+        ca_root = tmp_path / "ca-root"
+        completed = subprocess.CompletedProcess(
+            args=["mkcert", "-CAROOT"],
+            returncode=0,
+            stdout=f"{ca_root}\n",
+            stderr="",
+        )
+        with patch("cli_core_yo.certs.subprocess.run", return_value=completed):
+            assert ca_root_path() == ca_root
+
+    def test_ca_root_path_returns_none_on_failure(self):
+        completed = subprocess.CompletedProcess(
+            args=["mkcert", "-CAROOT"],
+            returncode=1,
+            stdout="",
+            stderr="bad",
+        )
+        with patch("cli_core_yo.certs.subprocess.run", return_value=completed):
+            assert ca_root_path() is None
+
+    def test_install_ca_false_when_binary_missing(self):
+        with patch("cli_core_yo.certs.shutil.which", return_value=None):
+            assert install_ca() is False
+
+    def test_install_ca_true_on_zero_exit(self):
+        completed = subprocess.CompletedProcess(args=["mkcert", "-install"], returncode=0)
+        with (
+            patch("cli_core_yo.certs.shutil.which", return_value="/usr/bin/mkcert"),
+            patch("cli_core_yo.certs.subprocess.run", return_value=completed),
+        ):
+            assert install_ca() is True
+
+
+class TestEnsureCerts:
+    def test_returns_existing_pair_without_generation(self, tmp_path: Path):
+        cert_path, key_path = _write_pair(tmp_path / "certs")
+
+        with patch("cli_core_yo.certs.shutil.which") as mock_which:
+            result = ensure_certs(tmp_path / "certs")
+
+        assert result == (cert_path, key_path)
+        mock_which.assert_not_called()
+
+    def test_raises_when_mkcert_missing(self, tmp_path: Path):
+        with patch("cli_core_yo.certs.shutil.which", return_value=None):
+            with pytest.raises(SystemExit, match="mkcert is required"):
+                ensure_certs(tmp_path / "certs")
+
+    def test_raises_when_mkcert_generation_fails(self, tmp_path: Path):
+        install_result = subprocess.CompletedProcess(args=["mkcert", "-install"], returncode=0)
+        generation_error = subprocess.CalledProcessError(
+            1,
+            ["mkcert"],
+            stderr="generation failed",
+        )
+
+        with (
+            patch("cli_core_yo.certs.shutil.which", return_value="/usr/bin/mkcert"),
+            patch(
+                "cli_core_yo.certs.subprocess.run",
+                side_effect=[install_result, generation_error],
+            ),
+        ):
+            with pytest.raises(SystemExit, match="generation failed"):
+                ensure_certs(tmp_path / "certs")
+
+    def test_raises_when_mkcert_does_not_create_files(self, tmp_path: Path):
+        install_result = subprocess.CompletedProcess(args=["mkcert", "-install"], returncode=0)
+        generation_result = subprocess.CompletedProcess(args=["mkcert"], returncode=0)
+
+        with (
+            patch("cli_core_yo.certs.shutil.which", return_value="/usr/bin/mkcert"),
+            patch(
+                "cli_core_yo.certs.subprocess.run",
+                side_effect=[install_result, generation_result],
+            ),
+        ):
+            with pytest.raises(SystemExit, match="did not produce"):
+                ensure_certs(tmp_path / "certs")
+
+    def test_generates_and_returns_cert_pair(self, tmp_path: Path):
+        certs_dir = tmp_path / "certs"
+        cert_path = certs_dir / CERT_FILENAME
+        key_path = certs_dir / KEY_FILENAME
+
+        def fake_run(args, **kwargs):
+            if "-cert-file" in args and "-key-file" in args:
+                cert_path.write_text("cert", encoding="utf-8")
+                key_path.write_text("key", encoding="utf-8")
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+        with (
+            patch("cli_core_yo.certs.shutil.which", return_value="/usr/bin/mkcert"),
+            patch("cli_core_yo.certs.subprocess.run", side_effect=fake_run),
+        ):
+            result = ensure_certs(certs_dir)
+
+        assert result == (cert_path, key_path)
+        assert cert_path.exists()
+        assert key_path.exists()
+
+
+class TestCertStatus:
+    def test_reports_readiness_and_paths(self, tmp_path: Path):
+        certs_dir = tmp_path / "certs"
+        cert_path, key_path = _write_pair(certs_dir)
+
+        with (
+            patch("cli_core_yo.certs.mkcert_available", return_value=True),
+            patch("cli_core_yo.certs.ca_installed", return_value=False),
+            patch("cli_core_yo.certs.ca_root_path", return_value=tmp_path / "ca-root"),
+        ):
+            status = cert_status(certs_dir)
+
+        assert status == {
+            "mkcert_installed": True,
+            "ca_installed": False,
+            "ca_root": str(tmp_path / "ca-root"),
+            "cert_exists": True,
+            "key_exists": True,
+            "cert_path": str(cert_path),
+            "key_path": str(key_path),
+        }

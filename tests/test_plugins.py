@@ -96,6 +96,30 @@ class TestExplicitPlugins:
         with pytest.raises(PluginLoadError, match="no_dots"):
             load_plugins(registry, spec)
 
+    def test_plugin_load_error_is_re_raised(self, registry):
+        original = PluginLoadError("inner", "already wrapped")
+
+        def bad_plugin(reg, spec):
+            raise original
+
+        spec = CliSpec(
+            prog_name="test",
+            app_display_name="Test",
+            dist_name="test-app",
+            root_help="Help.",
+            xdg=XdgSpec(app_dir_name="test"),
+            plugins=PluginSpec(explicit=["fake_mod.bad_plugin"]),
+        )
+        with patch("cli_core_yo.plugins.importlib") as mock_importlib:
+            mock_module = MagicMock()
+            mock_module.bad_plugin = bad_plugin
+            mock_importlib.import_module.return_value = mock_module
+
+            with pytest.raises(PluginLoadError) as excinfo:
+                load_plugins(registry, spec)
+
+        assert excinfo.value is original
+
 
 class TestEntryPointPlugins:
     def test_missing_entry_point_raises(self, registry):
@@ -130,6 +154,25 @@ class TestEntryPointPlugins:
         with patch("cli_core_yo.plugins.entry_points", return_value=[mock_ep]):
             load_plugins(registry, spec)
         assert len(calls) == 1
+
+    def test_entry_point_exception_is_wrapped(self, registry):
+        def bad_plugin(reg, spec):
+            raise RuntimeError("entry point exploded")
+
+        mock_ep = MagicMock()
+        mock_ep.load.return_value = bad_plugin
+
+        spec = CliSpec(
+            prog_name="test",
+            app_display_name="Test",
+            dist_name="test-app",
+            root_help="Help.",
+            xdg=XdgSpec(app_dir_name="test"),
+            plugins=PluginSpec(entry_points=["my-ep"]),
+        )
+        with patch("cli_core_yo.plugins.entry_points", return_value=[mock_ep]):
+            with pytest.raises(PluginLoadError, match="entry point exploded"):
+                load_plugins(registry, spec)
 
 
 class TestLoadOrder:
