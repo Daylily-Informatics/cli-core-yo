@@ -159,8 +159,6 @@ def resolve_https_certs(
     cert_path: str | Path | None = None,
     key_path: str | Path | None = None,
     env: dict[str, str] | None = None,
-    legacy_cert_env_vars: tuple[str, ...] = (),
-    legacy_key_env_vars: tuple[str, ...] = (),
     shared_certs_dir: str | Path | None = None,
     fallback_certs_dir: str | Path | None = None,
     hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "::1"),
@@ -171,10 +169,9 @@ def resolve_https_certs(
     Resolution order:
     1. Explicit ``cert_path`` / ``key_path``
     2. Generic env ``SSL_CERT_FILE`` / ``SSL_KEY_FILE``
-    3. Service-specific legacy env vars
-    4. Existing files in ``shared_certs_dir``
-    5. Existing files in ``fallback_certs_dir``
-    6. Optional mkcert generation, preferring ``shared_certs_dir``
+    3. Existing files in ``shared_certs_dir``
+    4. Existing files in ``fallback_certs_dir``
+    5. Optional mkcert generation, preferring ``shared_certs_dir``
     """
     env_map = os.environ if env is None else env
     resolved = _resolve_explicit_pair(cert_path, key_path, source="CLI flags")
@@ -189,15 +186,6 @@ def resolve_https_certs(
     )
     if resolved is not None:
         return _validated_paths(*resolved, source="env")
-
-    resolved = _resolve_env_pair(
-        env_map,
-        cert_env_vars=legacy_cert_env_vars,
-        key_env_vars=legacy_key_env_vars,
-        source="legacy SSL env",
-    )
-    if resolved is not None:
-        return _validated_paths(*resolved, source="legacy-env")
 
     shared_dir = Path(shared_certs_dir).expanduser() if shared_certs_dir else None
     if shared_dir is not None:

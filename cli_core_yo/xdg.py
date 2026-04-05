@@ -1,13 +1,14 @@
-"""XDG Base Directory path resolution (§6.4).
+"""XDG Base Directory path resolution.
 
-Supports optional legacy macOS config migration.
+Resolves config, data, state, and cache directories per the XDG spec,
+with macOS-specific paths for Library/Application Support.
 """
 
 from __future__ import annotations
 
 import os
 import platform
-import shutil
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -74,14 +75,5 @@ def resolve_paths(xdg_spec: XdgSpec) -> XdgPaths:
     # Create directories (§6.4: parents=True, exist_ok=True)
     for d in (config_dir, data_dir, state_dir, cache_dir):
         d.mkdir(parents=True, exist_ok=True)
-
-    # Legacy macOS migration (§6.4)
-    if xdg_spec.legacy_macos_config_dir and macos:
-        legacy_dir = Path(xdg_spec.legacy_macos_config_dir).expanduser()
-        for filename in xdg_spec.legacy_copy_files:
-            legacy_file = legacy_dir / filename
-            target_file = config_dir / filename
-            if legacy_file.exists() and not target_file.exists():
-                shutil.copy2(str(legacy_file), str(target_file))
 
     return XdgPaths(config=config_dir, data=data_dir, state=state_dir, cache=cache_dir)

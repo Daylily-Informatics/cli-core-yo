@@ -34,8 +34,6 @@ class TestXdgSpec:
     def test_minimal(self):
         spec = XdgSpec(app_dir_name="myapp")
         assert spec.app_dir_name == "myapp"
-        assert spec.legacy_macos_config_dir is None
-        assert spec.legacy_copy_files == []
 
     def test_frozen(self):
         spec = XdgSpec(app_dir_name="myapp")
