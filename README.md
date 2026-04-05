@@ -246,6 +246,7 @@ Behavior notes:
 ## Environment Variables
 
 This library supports a small set of environment-variable hooks, but env vars are discouraged in most cases.
+Treat them as escape hatches for process-scoped overrides, not the default configuration API between layers.
 
 Prefer, in order:
 
