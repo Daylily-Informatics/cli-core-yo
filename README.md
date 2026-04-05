@@ -243,6 +243,36 @@ Behavior notes:
 - `env status` reports environment status from the configured env vars.
 - `env activate`, `env deactivate`, and `env reset` print shell commands; they do not mutate the caller's shell environment.
 
+## Environment Variables
+
+This library supports a small set of environment-variable hooks, but env vars are discouraged in most cases.
+
+Prefer, in order:
+
+1. explicit CLI arguments
+2. `CliSpec` configuration in code
+3. config files managed through the built-in `config` group
+4. environment variables only for process-scoped overrides or integration boundaries
+
+There is no generic env-to-`CliSpec` mapping layer in `cli-core-yo`.
+
+Supported environment-variable behavior:
+
+- `CLI_CORE_YO_DEBUG=1` enables traceback/debug mode in `run()`.
+- `NO_COLOR=1` disables ANSI styling in human output.
+- `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` override the resolved app directories.
+- The built-in `env` group reads the downstream-defined names from `EnvSpec.active_env_var` and `EnvSpec.project_root_env_var`.
+- `VISUAL` or `EDITOR` control the editor used by `config edit`, with `vi` as fallback.
+- `resolve_https_certs()` supports `SSL_CERT_FILE` and `SSL_KEY_FILE`, plus caller-supplied legacy env-var names.
+- `shared_dayhoff_certs_dir()` respects `XDG_STATE_HOME`.
+- `source_env_file()` can load a simple `.env` file into `os.environ`, but only when downstream code calls it explicitly.
+
+What this library does not do:
+
+- it does not automatically populate `CliSpec` from env vars
+- it does not automatically load `.env` files during startup
+- it does not use env vars as the primary extension/configuration mechanism
+
 ## Runtime And Output Contract
 
 Use `get_context()` inside commands and plugins when you need invocation-scoped state:
