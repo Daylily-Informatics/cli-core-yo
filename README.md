@@ -207,12 +207,32 @@ Built-in subcommands:
 
 Behavior notes:
 
-- The config file path is resolved once per invocation from either `xdg_relative_path` or `absolute_path`.
+- The effective config file path is resolved once per invocation.
+- When config is enabled, the root command also accepts `--config PATH` as a one-invocation override.
+- `--config PATH` must appear before the subcommand, for example `my-tool --config ./alt.json config init`.
+- Relative `--config` paths resolve against the current working directory and are normalized to absolute paths for runtime use.
 - `config init` writes the configured template and supports `--force`.
 - `config validate` calls `validator(content)` when provided; otherwise it accepts the config.
 - `config edit` shells out to `VISUAL`, `EDITOR`, or `vi` and requires an interactive terminal.
 - `config reset` backs up the current file to a UTC timestamped `.bak` before rewriting the template.
-- Downstream commands and plugins can read the resolved file path from `get_context().config_path`.
+- If `--config` is absent, the invocation falls back to the spec-defined default path.
+- Downstream commands and plugins can read the effective active file path from `get_context().config_path`.
+
+Example fixed absolute default:
+
+```python
+SPEC = CliSpec(
+    prog_name="my-tool",
+    app_display_name="My Tool",
+    dist_name="my-tool",
+    root_help="Unified CLI for My Tool.",
+    xdg=XdgSpec(app_dir_name="my-tool"),
+    config=ConfigSpec(
+        absolute_path="/tmp/my-tool-config.json",
+        template_bytes=b'{"env": "dev"}\n',
+    ),
+)
+```
 
 ### `env`
 
@@ -300,7 +320,7 @@ def show_runtime() -> None:
 
 - `spec`
 - `xdg_paths`
-- `config_path`
+- `config_path` (the effective active config file after any root `--config PATH` override)
 - `json_mode`
 - `debug`
 

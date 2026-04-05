@@ -377,6 +377,18 @@ class TestInfoCommand:
         data = json.loads(result.output)
         assert data["Custom Key"] == "custom-val"
 
+    def test_info_includes_effective_config_file_when_enabled(
+        self, full_spec, tmp_path, monkeypatch
+    ):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        override_path = tmp_path / "override.json"
+
+        result = runner.invoke(app, ["--config", str(override_path), "info", "--json"])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert Path(data["Config File"]).resolve() == override_path.resolve()
+
 
 # ── Config group tests ──────────────────────────────────────────────────────
 
@@ -530,6 +542,7 @@ class TestConfigGroup:
     def test_config_edit_missing_file_in_tty(self, full_spec, tmp_path, monkeypatch, capsys):
         app = _make_app(full_spec, tmp_path, monkeypatch)
         callback = app._cli_core_yo_registry._roots["config"].children["edit"].callback
+        from cli_core_yo.runtime import _reset, initialize
 
         class FakeTTY:
             @staticmethod
@@ -537,6 +550,8 @@ class TestConfigGroup:
                 return True
 
         monkeypatch.setattr("cli_core_yo.app.sys.stdin", FakeTTY())
+        _reset()
+        initialize(full_spec, app._cli_core_yo_xdg_paths, config_path=_xdg_config_file(tmp_path))
 
         with pytest.raises(SystemExit, match="1"):
             callback()
@@ -550,6 +565,7 @@ class TestConfigGroup:
         app = _make_app(full_spec, tmp_path, monkeypatch)
         runner.invoke(app, ["config", "init"])
         callback = app._cli_core_yo_registry._roots["config"].children["edit"].callback
+        from cli_core_yo.runtime import _reset, initialize
 
         class FakeTTY:
             @staticmethod
@@ -561,6 +577,8 @@ class TestConfigGroup:
             "cli_core_yo.app.subprocess.run",
             lambda args: SimpleNamespace(returncode=3),
         )
+        _reset()
+        initialize(full_spec, app._cli_core_yo_xdg_paths, config_path=_xdg_config_file(tmp_path))
 
         with pytest.raises(SystemExit, match="1"):
             callback()
@@ -632,6 +650,7 @@ class TestConfigGroup:
         assert result.exit_code == 0
 
         callback = app._cli_core_yo_registry._roots["config"].children["edit"].callback
+        from cli_core_yo.runtime import _reset, initialize
 
         class FakeTTY:
             @staticmethod
@@ -644,6 +663,8 @@ class TestConfigGroup:
             "cli_core_yo.app.subprocess.run",
             lambda args: captured_args.append(args) or SimpleNamespace(returncode=0),
         )
+        _reset()
+        initialize(spec, app._cli_core_yo_xdg_paths, config_path=config_file)
         callback()
         assert captured_args == [["vi", str(config_file)]]
         assert capsys.readouterr().out == ""
@@ -719,6 +740,96 @@ class TestConfigGroup:
         assert result.exit_code == 0
         assert config_file.exists()
         assert config_file.read_bytes() == b'{"key": "value"}\n'
+
+    def test_root_config_override_absolute_path(self, full_spec, tmp_path, monkeypatch):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        override_path = tmp_path / "override.json"
+
+        result = runner.invoke(app, ["--config", str(override_path), "config", "path"])
+
+        assert result.exit_code == 0
+        assert _printed_path(result.output).resolve() == override_path.resolve()
+
+    def test_root_config_override_relative_path_resolves_from_cwd(
+        self, full_spec, tmp_path, monkeypatch
+    ):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        cwd = tmp_path / "workspace"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+
+        result = runner.invoke(app, ["--config", "./override.json", "config", "path"])
+
+        assert result.exit_code == 0
+        assert _printed_path(result.output).resolve() == (cwd / "override.json").resolve()
+
+    def test_root_config_override_parent_relative_path_resolves_from_cwd(
+        self, full_spec, tmp_path, monkeypatch
+    ):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        cwd = tmp_path / "workspace" / "nested"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+
+        result = runner.invoke(app, ["--config", "../override.json", "config", "path"])
+
+        assert result.exit_code == 0
+        assert _printed_path(result.output).resolve() == (cwd.parent / "override.json").resolve()
+
+    def test_root_config_override_expands_tilde(self, full_spec, tmp_path, monkeypatch):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        override_path = tmp_path / "override.json"
+
+        result = runner.invoke(app, ["--config", "~/override.json", "config", "path"])
+
+        assert result.exit_code == 0
+        assert _printed_path(result.output).resolve() == override_path.resolve()
+
+    def test_root_config_override_init_uses_override(self, full_spec, tmp_path, monkeypatch):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        override_path = tmp_path / "override.json"
+
+        result = runner.invoke(app, ["--config", str(override_path), "config", "init"])
+
+        assert result.exit_code == 0
+        assert override_path.exists()
+        assert override_path.read_bytes() == b'{"key": "value"}\n'
+        assert not _xdg_config_file(tmp_path).exists()
+
+    def test_root_config_override_does_not_persist_between_invocations(
+        self, full_spec, tmp_path, monkeypatch
+    ):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        override_path = tmp_path / "override.json"
+
+        first = runner.invoke(app, ["--config", str(override_path), "config", "path"])
+        second = runner.invoke(app, ["config", "path"])
+
+        assert first.exit_code == 0
+        assert second.exit_code == 0
+        assert _printed_path(first.output).resolve() == override_path.resolve()
+        assert _printed_path(second.output).resolve() == _xdg_config_file(tmp_path).resolve()
+
+    def test_root_config_override_available_to_downstream_command_via_create_app(
+        self, full_spec, tmp_path, monkeypatch
+    ):
+        def _load_plugins(registry, spec):
+            def _show_context() -> None:
+                from cli_core_yo.runtime import get_context
+
+                print(get_context().config_path)
+
+            registry.add_command(None, "show-context", _show_context, help_text="Show context.")
+
+        monkeypatch.setattr("cli_core_yo.app.load_plugins", _load_plugins)
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        override_path = tmp_path / "override.json"
+
+        result = runner.invoke(app, ["--config", str(override_path), "show-context"])
+
+        assert result.exit_code == 0
+        assert _printed_path(result.output).resolve() == override_path.resolve()
 
 
 # ── Env group tests ─────────────────────────────────────────────────────────
@@ -805,45 +916,50 @@ class TestRun:
         exit_code = run(bad_spec, ["version"])
         assert exit_code == 1
 
-    def test_run_initializes_runtime_with_config_path(self, xdg_spec, tmp_path, monkeypatch):
-        config_path = tmp_path / "explicit-config.json"
-        spec = CliSpec(
-            prog_name="test-app",
-            app_display_name="Test App",
-            dist_name="cli-core-yo",
-            root_help="A test.",
-            xdg=xdg_spec,
-            config=ConfigSpec(absolute_path=config_path, template_bytes=b"{}"),
-        )
-
-        class FakeApp:
-            _cli_core_yo_xdg_paths = object()
-            _cli_core_yo_config_path = config_path
-
-            def __call__(self, args, standalone_mode=False):
+    def test_run_initializes_runtime_with_effective_config_path(
+        self, full_spec, tmp_path, monkeypatch, capsys
+    ):
+        def _load_plugins(registry, spec):
+            def _show_context() -> None:
                 from cli_core_yo.runtime import get_context
 
-                assert get_context().config_path == config_path
+                print(get_context().config_path)
 
-        monkeypatch.setattr("cli_core_yo.app.create_app", lambda spec: FakeApp())
+            registry.add_command(None, "show-context", _show_context, help_text="Show context.")
 
-        assert run(spec, ["config", "path"]) == 0
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+        monkeypatch.setattr("cli_core_yo.app.load_plugins", _load_plugins)
+
+        override_path = tmp_path / "run-override.json"
+        assert run(full_spec, ["--config", str(override_path), "show-context"]) == 0
+
+        out = capsys.readouterr().out
+        assert _printed_path(out).resolve() == override_path.resolve()
 
     def test_run_initializes_runtime_without_config_path_when_config_disabled(
-        self, minimal_spec, monkeypatch
+        self, minimal_spec, tmp_path, monkeypatch, capsys
     ):
-        class FakeApp:
-            _cli_core_yo_xdg_paths = object()
-            _cli_core_yo_config_path = None
-
-            def __call__(self, args, standalone_mode=False):
+        def _load_plugins(registry, spec):
+            def _show_context() -> None:
                 from cli_core_yo.runtime import get_context
 
-                assert get_context().config_path is None
+                print(get_context().config_path)
 
-        monkeypatch.setattr("cli_core_yo.app.create_app", lambda spec: FakeApp())
+            registry.add_command(None, "show-context", _show_context, help_text="Show context.")
 
-        assert run(minimal_spec, ["version"]) == 0
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+        monkeypatch.setattr("cli_core_yo.app.load_plugins", _load_plugins)
+
+        assert run(minimal_spec, ["show-context"]) == 0
+
+        out = capsys.readouterr().out
+        assert out.strip() == "None"
 
     def test_run_non_integer_system_exit_returns_zero(self, minimal_spec, monkeypatch):
         class FakeApp:
@@ -908,6 +1024,7 @@ class TestRootHelp:
         result = runner.invoke(app, ["--help"])
         assert "config" in result.output.lower()
         assert "env" in result.output.lower()
+        assert "--config" in result.output
 
     def test_help_no_config_env_when_disabled(self, minimal_spec, tmp_path, monkeypatch):
         app = _make_app(minimal_spec, tmp_path, monkeypatch)
@@ -918,6 +1035,7 @@ class TestRootHelp:
         lines = out_lower.splitlines()
         cmd_lines = [ln.strip() for ln in lines if ln.strip().startswith(("config", "env "))]
         assert len(cmd_lines) == 0
+        assert "--config" not in result.output
 
 
 class TestGlobalFlags:
@@ -938,12 +1056,32 @@ class TestGlobalFlags:
         out_lower = result.output.lower()
         assert "install-completion" in out_lower or "completion" in out_lower
 
+    def test_root_config_flag_rejected_when_config_disabled(
+        self, minimal_spec, tmp_path, monkeypatch
+    ):
+        app = _make_app(minimal_spec, tmp_path, monkeypatch)
+        result = runner.invoke(app, ["--config", "override.json", "version"])
+        assert result.exit_code == 2
+
     def test_command_help_flag(self, minimal_spec, tmp_path, monkeypatch):
         """§2.4 — <prog> <command> --help shows command-scoped help."""
         app = _make_app(minimal_spec, tmp_path, monkeypatch)
         result = runner.invoke(app, ["version", "--help"])
         assert result.exit_code == 0
         assert "version" in result.output.lower()
+
+    def test_root_config_flag_must_precede_subcommand(self, full_spec, tmp_path, monkeypatch):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "path", "--config", "override.json"])
+        assert result.exit_code == 2
+
+    def test_root_config_flag_does_not_change_version_behavior(
+        self, full_spec, tmp_path, monkeypatch
+    ):
+        app = _make_app(full_spec, tmp_path, monkeypatch)
+        result = runner.invoke(app, ["--config", str(tmp_path / "override.json"), "version"])
+        assert result.exit_code == 0
+        assert "Test App" in result.output
 
 
 class TestCommandOrdering:

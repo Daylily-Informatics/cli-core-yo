@@ -38,6 +38,10 @@ If optional built-ins are needed:
 - `ConfigSpec`: provide exactly one of `xdg_relative_path` or `absolute_path`, and exactly one of `template_bytes` or `template_resource`.
 - `EnvSpec`: provide `active_env_var`, `project_root_env_var`, `activate_script_name`, `deactivate_script_name`.
 
+When `ConfigSpec` is enabled, the root CLI also supports `--config PATH` as a one-invocation override.
+That override must appear before the subcommand.
+Relative override paths resolve from the current working directory.
+
 ## Plugin and Registry Rules
 Register downstream commands via plugins with signature:
 `(registry: CommandRegistry, spec: CliSpec) -> None`
@@ -75,7 +79,7 @@ Behavior guarantees:
 - `NO_COLOR` disables ANSI styling
 
 ## Runtime and Error Handling
-Use `cli_core_yo.runtime.get_context()` inside commands/plugins for invocation state, including the resolved `config_path` when config is enabled.
+Use `cli_core_yo.runtime.get_context()` inside commands/plugins for invocation state, including the effective `config_path` after any root `--config PATH` override when config is enabled.
 Do not manually initialize runtime outside framework startup.
 
 `run()` returns exit codes and does not call `sys.exit()`.

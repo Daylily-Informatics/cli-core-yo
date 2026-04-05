@@ -23,9 +23,68 @@ from cli_core_yo import output
 from cli_core_yo.errors import CliCoreYoError
 from cli_core_yo.plugins import load_plugins
 from cli_core_yo.registry import CommandRegistry
-from cli_core_yo.runtime import _reset, initialize
+from cli_core_yo.runtime import _reset, get_context, initialize
 from cli_core_yo.spec import CliSpec, ConfigSpec, EnvSpec
 from cli_core_yo.xdg import XdgPaths, resolve_paths
+
+
+class _CliCoreRootGroup(typer.core.TyperGroup):
+    """Root Typer group that bootstraps runtime for each invocation."""
+
+    def invoke(self, ctx: click.Context):  # type: ignore[override]
+        _reset()
+
+        def _process_result(value):
+            if self._result_callback is not None:
+                value = ctx.invoke(self._result_callback, value, **ctx.params)
+            return value
+
+        if not ctx._protected_args:
+            if self.invoke_without_command:
+                with ctx:
+                    rv = click.Command.invoke(self, ctx)
+                    return _process_result([] if self.chain else rv)
+            ctx.fail("Missing command.")
+
+        args = [*ctx._protected_args, *ctx.args]
+        ctx.args = []
+        ctx._protected_args = []
+
+        if not self.chain:
+            with ctx:
+                cmd_name, cmd, cmd_args = self.resolve_command(ctx, args)
+                assert cmd is not None
+                ctx.invoked_subcommand = cmd_name
+                click.Command.invoke(self, ctx)
+                _bootstrap_runtime(ctx, args)
+                sub_ctx = cmd.make_context(cmd_name, cmd_args, parent=ctx)
+                with sub_ctx:
+                    return _process_result(sub_ctx.command.invoke(sub_ctx))
+
+        with ctx:
+            ctx.invoked_subcommand = "*" if args else None
+            click.Command.invoke(self, ctx)
+            _bootstrap_runtime(ctx, args)
+
+            contexts = []
+            while args:
+                cmd_name, cmd, args = self.resolve_command(ctx, args)
+                assert cmd is not None
+                sub_ctx = cmd.make_context(
+                    cmd_name,
+                    args,
+                    parent=ctx,
+                    allow_extra_args=True,
+                    allow_interspersed_args=False,
+                )
+                contexts.append(sub_ctx)
+                args, sub_ctx.args = sub_ctx.args, []
+
+            rv = []
+            for sub_ctx in contexts:
+                with sub_ctx:
+                    rv.append(sub_ctx.command.invoke(sub_ctx))
+            return _process_result(rv)
 
 
 def create_app(spec: CliSpec) -> typer.Typer:
@@ -34,7 +93,7 @@ def create_app(spec: CliSpec) -> typer.Typer:
     Sequence (§3.5):
     1. Validate spec
     2. Construct root Typer app
-    3. Initialize RuntimeContext
+    3. Register the root callback and invocation metadata
     4. Register built-in commands (version, info)
     5. Conditionally register config group
     6. Conditionally register env group
@@ -46,6 +105,7 @@ def create_app(spec: CliSpec) -> typer.Typer:
 
     app = typer.Typer(
         name=spec.prog_name,
+        cls=_CliCoreRootGroup,
         help=spec.root_help,
         add_completion=True,
         no_args_is_help=True,
@@ -53,9 +113,11 @@ def create_app(spec: CliSpec) -> typer.Typer:
         context_settings={"help_option_names": ["--help"]},
     )
 
-    # Resolve XDG paths and initialize runtime
+    # Resolve XDG paths and default config location
     xdg_paths = resolve_paths(spec.xdg)
-    config_path = _resolve_config_path(spec.config, xdg_paths)
+    default_config_path = _resolve_config_path(spec.config, xdg_paths)
+
+    _register_root_callback(app, spec, xdg_paths, default_config_path)
 
     # Build reserved names from enabled optional groups
     reserved: set[str] = set()
@@ -72,7 +134,7 @@ def create_app(spec: CliSpec) -> typer.Typer:
 
     # Register optional built-in groups
     if spec.config is not None:
-        _register_config_group(registry, spec.config, config_path)
+        _register_config_group(registry, spec.config)
     if spec.env is not None:
         _register_env_group(registry, spec.env, xdg_paths)
 
@@ -87,7 +149,7 @@ def create_app(spec: CliSpec) -> typer.Typer:
     app._cli_core_yo_registry = registry  # type: ignore[attr-defined]
     app._cli_core_yo_spec = spec  # type: ignore[attr-defined]
     app._cli_core_yo_xdg_paths = xdg_paths  # type: ignore[attr-defined]
-    app._cli_core_yo_config_path = config_path  # type: ignore[attr-defined]
+    app._cli_core_yo_config_path = default_config_path  # type: ignore[attr-defined]
 
     return app
 
@@ -96,20 +158,9 @@ def run(spec: CliSpec, argv: list[str] | None = None) -> int:
     """Execute the CLI and return an exit code. MUST NOT call sys.exit()."""
     _reset()  # ensure clean context for this invocation
 
-    # Determine debug mode from environment (§6.6)
-    debug = os.environ.get("CLI_CORE_YO_DEBUG") == "1"
-
     try:
         app = create_app(spec)
-        xdg_paths = app._cli_core_yo_xdg_paths  # type: ignore[attr-defined]
-        config_path = getattr(app, "_cli_core_yo_config_path", None)
-
-        # Determine json_mode from argv before Typer parses
         args = argv if argv is not None else sys.argv[1:]
-        json_mode = "--json" in args or "-j" in args
-
-        initialize(spec, xdg_paths, config_path=config_path, json_mode=json_mode, debug=debug)
-
         app(args, standalone_mode=False)
         return 0
     except click.exceptions.NoArgsIsHelpError:
@@ -117,12 +168,12 @@ def run(spec: CliSpec, argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 0
     except CliCoreYoError as exc:
-        if debug:
+        if os.environ.get("CLI_CORE_YO_DEBUG") == "1":
             traceback.print_exc(file=sys.stderr)
         output.error(str(exc))
         return exc.exit_code
     except Exception as exc:
-        if debug:
+        if os.environ.get("CLI_CORE_YO_DEBUG") == "1":
             traceback.print_exc(file=sys.stderr)
         output.error(f"Unexpected error: {exc}")
         return 1
@@ -146,6 +197,63 @@ def _validate_spec(spec: CliSpec) -> None:
         raise SpecValidationError("dist_name must not be empty")
     if not spec.root_help:
         raise SpecValidationError("root_help must not be empty")
+
+
+def _register_root_callback(
+    app: typer.Typer,
+    spec: CliSpec,
+    xdg_paths: XdgPaths,
+    default_config_path: Path | None,
+) -> None:
+    """Register the root callback used for global options and invocation metadata."""
+
+    if spec.config is None:
+
+        @app.callback()
+        def _root_callback_no_config(ctx: typer.Context) -> None:
+            _store_invocation_metadata(ctx, spec, xdg_paths, default_config_path)
+
+        return
+
+    @app.callback()
+    def _root_callback_with_config(
+        ctx: typer.Context,
+        config: str | None = typer.Option(
+            None,
+            "--config",
+            metavar="PATH",
+            help="Use this config file for this invocation only.",
+        ),
+    ) -> None:
+        _store_invocation_metadata(ctx, spec, xdg_paths, default_config_path)
+
+
+def _store_invocation_metadata(
+    ctx: typer.Context,
+    spec: CliSpec,
+    xdg_paths: XdgPaths,
+    default_config_path: Path | None,
+) -> None:
+    """Attach immutable invocation metadata to the root Click context."""
+    ctx.meta["cli_core_yo_spec"] = spec
+    ctx.meta["cli_core_yo_xdg_paths"] = xdg_paths
+    ctx.meta["cli_core_yo_default_config_path"] = default_config_path
+
+
+def _bootstrap_runtime(root_ctx: click.Context, raw_args: list[str]) -> None:
+    """Initialize runtime once the root options and active command are known."""
+    spec = root_ctx.meta["cli_core_yo_spec"]
+    xdg_paths = root_ctx.meta["cli_core_yo_xdg_paths"]
+    default_config_path = root_ctx.meta["cli_core_yo_default_config_path"]
+    config_override = root_ctx.params.get("config")
+    config_path = _resolve_invocation_config_path(default_config_path, config_override)
+    initialize(
+        spec,
+        xdg_paths,
+        config_path=config_path,
+        json_mode=_argv_requests_json(raw_args),
+        debug=os.environ.get("CLI_CORE_YO_DEBUG") == "1",
+    )
 
 
 # ── Built-in: version ────────────────────────────────────────────────────────
@@ -189,6 +297,10 @@ def _register_info(registry: CommandRegistry, spec: CliSpec, xdg_paths: XdgPaths
             ("Cache Dir", str(xdg_paths.cache)),
             ("CLI Core", core_version),
         ]
+        if spec.config is not None:
+            config_path = get_context().config_path
+            if config_path is not None:
+                rows.append(("Config File", str(config_path)))
 
         # Extension hooks (§6.3)
         for hook in spec.info_hooks:
@@ -211,19 +323,16 @@ def _register_info(registry: CommandRegistry, spec: CliSpec, xdg_paths: XdgPaths
 
 
 def _register_config_group(
-    registry: CommandRegistry, config_spec: ConfigSpec, config_path: Path | None
+    registry: CommandRegistry, config_spec: ConfigSpec
 ) -> None:
     """Register built-in config subcommands (§4.6)."""
-    if config_path is None:
-        raise ValueError("config_path must be resolved when the config group is enabled.")
-
     registry._reserved.discard("config")
     registry.add_group("config", help_text="Configuration management.")
     registry._reserved.add("config")
 
     # config path
     def _config_path_callback() -> None:
-        output.print_text(str(config_path))
+        output.print_text(str(_active_config_path()))
 
     registry.add_command(
         "config",
@@ -236,6 +345,7 @@ def _register_config_group(
     def _config_init_callback(
         force: bool = typer.Option(False, "--force", help="Overwrite existing file."),
     ) -> None:
+        config_path = _active_config_path()
         if config_path.exists() and not force:
             output.error(f"Config file already exists: {config_path}")
             output.detail("Use --force to overwrite.")
@@ -254,6 +364,7 @@ def _register_config_group(
 
     # config show
     def _config_show_callback() -> None:
+        config_path = _active_config_path()
         if not config_path.exists():
             output.error(f"Config file not found: {config_path}")
             raise SystemExit(1)
@@ -271,6 +382,7 @@ def _register_config_group(
         if config_spec.validator is None:
             output.success("No validator configured — config is accepted.")
             return
+        config_path = _active_config_path()
         if not config_path.exists():
             output.error(f"Config file not found: {config_path}")
             raise SystemExit(1)
@@ -295,6 +407,7 @@ def _register_config_group(
         if not sys.stdin.isatty():
             output.error("Cannot edit config: not an interactive terminal.")
             raise SystemExit(1)
+        config_path = _active_config_path()
         if not config_path.exists():
             output.error(f"Config file not found: {config_path}")
             raise SystemExit(1)
@@ -315,6 +428,7 @@ def _register_config_group(
     def _config_reset_callback(
         yes: bool = typer.Option(False, "--yes", help="Skip confirmation."),
     ) -> None:
+        config_path = _active_config_path()
         if config_path.exists():
             if not yes:
                 confirm = typer.confirm(
@@ -433,3 +547,29 @@ def _resolve_config_path(config_spec: ConfigSpec | None, xdg_paths: XdgPaths) ->
     if config_spec.absolute_path is not None:
         return Path(config_spec.absolute_path).expanduser()
     raise ValueError("ConfigSpec has no location source")
+
+
+def _resolve_invocation_config_path(
+    default_config_path: Path | None, config_override: str | None
+) -> Path | None:
+    """Resolve the effective config path for this invocation."""
+    if config_override is None:
+        return default_config_path
+
+    override_path = Path(config_override).expanduser()
+    if not override_path.is_absolute():
+        override_path = Path.cwd() / override_path
+    return override_path.resolve()
+
+
+def _argv_requests_json(argv: list[str]) -> bool:
+    """Return True if the raw argv contains a JSON output flag anywhere."""
+    return "--json" in argv or "-j" in argv
+
+
+def _active_config_path() -> Path:
+    """Return the effective config path from runtime context."""
+    config_path = get_context().config_path
+    if config_path is None:
+        raise RuntimeError("Config path is unavailable because the config group is disabled.")
+    return config_path

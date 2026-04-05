@@ -176,6 +176,24 @@ MUST exit with status code 0 on success.
 
 
 
+--config PATH
+
+
+This flag is part of the contract only when `spec.config` is enabled.
+
+
+It selects the active config file for the current invocation only.
+
+
+It MUST have no short alias.
+
+
+It MUST be accepted only at the root, before the subcommand path.
+
+
+If PATH is relative, it MUST resolve against the current working directory and be normalized to an absolute path for runtime use.
+
+
 No other global flags are part of the immutable contract.
 Critical constraint:
 
@@ -455,7 +473,7 @@ cli_core_yo/runtime.py
 Defines RuntimeContext dataclass.
 
 
-RuntimeContext includes the resolved config file path for the current invocation, or null when config is disabled.
+RuntimeContext includes the effective config file path for the current invocation, after any root `--config PATH` override, or null when config is disabled.
 
 
 Owns runtime initialization and access:
@@ -602,7 +620,7 @@ cli_core_yo.runtime.get_context() -> RuntimeContext
 Returns the current invocation’s context.
 
 
-The returned context includes the resolved config file path for the invocation, or null when config is disabled.
+The returned context includes the effective config file path for the invocation, after any root `--config PATH` override, or null when config is disabled.
 
 
 MUST raise a framework error if called before initialization.
@@ -637,7 +655,7 @@ Validate CliSpec (non-empty required fields, valid regex for names).
 Construct root Typer app (Section 3.4).
 
 
-Initialize RuntimeContext and store it in runtime, including the resolved config file path when config is enabled.
+Initialize RuntimeContext and store it in runtime, including the effective config file path when config is enabled.
 
 
 Register built-in commands:
@@ -862,16 +880,22 @@ If spec.config is not null, cli-core-yo MUST register config group with these su
 When config is enabled, cli-core-yo MUST resolve exactly one config file path per invocation.
 
 
-That resolved path MUST come from either `ConfigSpec.xdg_relative_path` under the resolved XDG config dir or `ConfigSpec.absolute_path`.
+The effective config path MUST use this precedence:
 
 
-All built-in config subcommands MUST operate on that same resolved config file path.
+1. root `--config PATH` for the current invocation, when provided
+
+
+2. otherwise the spec-defined default from `ConfigSpec.xdg_relative_path` under the resolved XDG config dir or `ConfigSpec.absolute_path`
+
+
+All built-in config subcommands MUST operate on that same effective config file path.
 
 
 config path
 
 
-Prints the resolved config file path.
+Prints the effective active config file path for the current invocation.
 
 
 Exit code 0.
@@ -882,7 +906,7 @@ Exit code 0.
 config init
 
 
-Creates the config file at the resolved config path from the configured template content.
+Creates the config file at the effective config path from the configured template content.
 
 
 If the config file exists and --force is not provided, MUST exit 1.
@@ -901,7 +925,7 @@ Options:
 config show
 
 
-Prints the config file contents from the resolved config path to stdout.
+Prints the config file contents from the effective config path to stdout.
 
 
 If the file does not exist, MUST exit 1.
@@ -937,7 +961,7 @@ If not interactive, MUST exit 1.
 config reset
 
 
-Replaces config file content at the resolved config path with template content.
+Replaces config file content at the effective config path with template content.
 
 
 MUST create a timestamped backup before overwriting.
@@ -1256,6 +1280,9 @@ Config Dir: XDG config dir path
 
 
 This row is directory-level metadata and does not imply the active config file is XDG-relative when `ConfigSpec.absolute_path` is used.
+
+
+Config File: effective active config file path for the invocation when config is enabled
 
 
 Data Dir: XDG data dir path
