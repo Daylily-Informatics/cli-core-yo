@@ -104,8 +104,8 @@ def bullet(msg: str) -> None:
     _get_console().print(f"   • {msg}")
 
 
-def print_text(msg: str) -> None:
-    """Print arbitrary text through the console (respects NO_COLOR)."""
+def print_text(msg: Any) -> None:
+    """Print arbitrary text or Rich renderable through the console (respects NO_COLOR)."""
     if _is_json_mode():
         return
     _get_console().print(msg)
