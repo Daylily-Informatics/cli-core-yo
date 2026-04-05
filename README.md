@@ -217,6 +217,9 @@ Behavior notes:
 - `config reset` backs up the current file to a UTC timestamped `.bak` before rewriting the template.
 - If `--config` is absent, the invocation falls back to the spec-defined default path.
 - Downstream commands and plugins can read the effective active file path from `get_context().config_path`.
+- There is no built-in parsed-config API or key-level edit/set/update facility.
+- `config edit` is whole-file editor launch only; it does not perform structured mutation.
+- Downstream code is responsible for loading, parsing, and updating config values after creation.
 
 Example fixed absolute default:
 
