@@ -5,4 +5,6 @@ try:
 except ImportError:
     __version__ = "0.0.0.dev0"
 
-__all__ = ["__version__"]
+from cli_core_yo.output import ccyo_out
+
+__all__ = ["__version__", "ccyo_out"]

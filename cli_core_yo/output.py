@@ -121,3 +121,31 @@ def emit_json(data: Any) -> None:
     text = json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False)
     sys.stdout.write(text + "\n")
     sys.stdout.flush()
+
+
+# ── Singleton output object ───────────────────────────────────────────────────
+
+
+class CliOutput:
+    """Collision-safe wrapper around the output module functions.
+
+    Usage::
+
+        from cli_core_yo import ccyo_out
+        ccyo_out.info("hello")
+        ccyo_out.error("oops")
+    """
+
+    heading = staticmethod(heading)
+    success = staticmethod(success)
+    warning = staticmethod(warning)
+    error = staticmethod(error)
+    action = staticmethod(action)
+    detail = staticmethod(detail)
+    bullet = staticmethod(bullet)
+    print_text = staticmethod(print_text)
+    emit_json = staticmethod(emit_json)
+    info = staticmethod(detail)  # alias
+
+
+ccyo_out = CliOutput()

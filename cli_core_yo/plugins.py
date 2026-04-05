@@ -15,7 +15,7 @@ import importlib
 from importlib.metadata import entry_points
 from typing import TYPE_CHECKING
 
-from cli_core_yo import output
+from cli_core_yo.output import ccyo_out
 from cli_core_yo.errors import PluginLoadError
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ def _load_explicit(
         module = importlib.import_module(module_path)
         callable_ = getattr(module, attr_name)
     except Exception as exc:
-        output.error(f"Plugin '{import_path}': {exc}")
+        ccyo_out.error(f"Plugin '{import_path}': {exc}")
         raise PluginLoadError(import_path, str(exc)) from exc
 
     try:
@@ -67,7 +67,7 @@ def _load_explicit(
     except PluginLoadError:
         raise
     except Exception as exc:
-        output.error(f"Plugin '{import_path}' raised: {exc}")
+        ccyo_out.error(f"Plugin '{import_path}' raised: {exc}")
         raise PluginLoadError(import_path, str(exc)) from exc
 
 
@@ -85,7 +85,7 @@ def _load_entry_point(
         # Use the first match (deterministic: name is unique per dist)
         callable_ = matches[0].load()
     except Exception as exc:
-        output.error(f"Entry-point plugin '{ep_name}': {exc}")
+        ccyo_out.error(f"Entry-point plugin '{ep_name}': {exc}")
         raise PluginLoadError(ep_name, str(exc)) from exc
 
     try:
@@ -93,5 +93,5 @@ def _load_entry_point(
     except PluginLoadError:
         raise
     except Exception as exc:
-        output.error(f"Entry-point plugin '{ep_name}' raised: {exc}")
+        ccyo_out.error(f"Entry-point plugin '{ep_name}' raised: {exc}")
         raise PluginLoadError(ep_name, str(exc)) from exc
