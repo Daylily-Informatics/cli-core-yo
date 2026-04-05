@@ -30,7 +30,7 @@ It is not a standalone service CLI and it is not the place for downstream busine
 
 Install the package:
 
-```bash
+```console
 pip install cli-core-yo
 ```
 
@@ -371,7 +371,7 @@ Use this for service-style CLIs that need small process-management helpers.
 
 Bootstrap a local development environment from the repo root:
 
-```bash
+```console
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -379,7 +379,7 @@ pip install -e ".[dev]"
 
 Validation commands used by this repo:
 
-```bash
+```console
 python -m pytest tests/ -v --cov=cli_core_yo
 ruff check cli_core_yo tests
 ruff format --check cli_core_yo tests
@@ -399,3 +399,24 @@ Use the tests in [`tests/`](tests/) as the executable compatibility surface. Whe
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
+
+## Guidance For AI Agents
+
+If you are modifying this repository with an AI coding agent, treat `cli-core-yo` as a shared CLI framework layer, not as a standalone service CLI.
+
+- Prefer framework extension points over ad-hoc Typer wiring.
+- Define exactly one immutable `CliSpec` in downstream CLIs and route execution through `run(spec, argv=None)`.
+- Add downstream behavior through `CommandRegistry` and plugins, not by mutating the root app directly.
+- Respect reserved root names: `version`, `info`, and optional built-ins `config` and `env`.
+- Use `get_context()` for invocation-scoped runtime state.
+- Use `cli_core_yo.output` for human output and `emit_json()` for machine output instead of custom ANSI or JSON formatting.
+- Keep behavior aligned with [`SPEC.md`](SPEC.md) and the tests in [`tests/`](tests/).
+- Run the repo validation commands before handing work back:
+  `python -m pytest tests/ -v --cov=cli_core_yo`,
+  `ruff check cli_core_yo tests`,
+  `ruff format --check cli_core_yo tests`,
+  `mypy cli_core_yo --ignore-missing-imports`,
+  `python -m build`,
+  `twine check dist/*`.
+
+For the repo-specific agent policy, see [`AI_DIRECTIVE.md`](AI_DIRECTIVE.md).

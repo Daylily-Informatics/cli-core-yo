@@ -15,6 +15,7 @@ import sys
 import traceback
 from datetime import datetime, timezone
 
+import click
 import typer
 
 from cli_core_yo import output
@@ -106,6 +107,8 @@ def run(spec: CliSpec, argv: list[str] | None = None) -> int:
         initialize(spec, xdg_paths, json_mode=json_mode, debug=debug)
 
         app(args, standalone_mode=False)
+        return 0
+    except click.exceptions.NoArgsIsHelpError:
         return 0
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 0

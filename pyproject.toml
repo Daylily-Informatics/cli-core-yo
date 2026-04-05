@@ -42,6 +42,7 @@ Issues = "https://github.com/Daylily-Informatics/cli-core-yo/issues"
 dev = [
     "bandit[toml]>=1.8.0",
     "pre-commit>=3.8.0",
+    "mktestdocs>=0.2.5",
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.4.0",
