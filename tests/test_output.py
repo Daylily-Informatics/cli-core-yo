@@ -99,6 +99,25 @@ class TestHumanPrimitives:
         out = capsys.readouterr().out
         assert "   •" in out
 
+    @pytest.mark.usefixtures("_init_context")
+    def test_print_text_outputs_literal_text(self, capsys):
+        output.print_text("[cyan]literal[/cyan]")
+        out = capsys.readouterr().out
+        assert out == "[cyan]literal[/cyan]\n"
+
+    @pytest.mark.usefixtures("_init_context")
+    def test_print_text_does_not_duplicate_trailing_newline(self, capsys):
+        output.print_text("line\n")
+        out = capsys.readouterr().out
+        assert out == "line\n"
+
+    @pytest.mark.usefixtures("_init_context")
+    def test_print_rich_renders_markup(self, capsys):
+        output.print_rich("[cyan]styled[/cyan]")
+        out = capsys.readouterr().out
+        assert "styled" in out
+        assert "[cyan]" not in out
+
 
 class TestJsonModeSuppression:
     @pytest.mark.usefixtures("_init_json_context")
@@ -164,3 +183,10 @@ class TestCliOutputObject:
         output.ccyo_out.emit_json({"ok": True})
         out = capsys.readouterr().out
         assert json.loads(out) == {"ok": True}
+
+    @pytest.mark.usefixtures("_init_context")
+    def test_ccyo_out_exposes_print_rich(self, capsys):
+        output.ccyo_out.print_rich("[cyan]hello[/cyan]")
+        out = capsys.readouterr().out
+        assert "hello" in out
+        assert "[cyan]" not in out

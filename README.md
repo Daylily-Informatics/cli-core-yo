@@ -292,7 +292,7 @@ Supported environment-variable behavior:
 - `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` override the resolved app directories.
 - The built-in `env` group reads the downstream-defined names from `EnvSpec.active_env_var` and `EnvSpec.project_root_env_var`.
 - `VISUAL` or `EDITOR` control the editor used by `config edit`, with `vi` as fallback.
-- `resolve_https_certs()` supports `SSL_CERT_FILE` and `SSL_KEY_FILE`, plus caller-supplied legacy env-var names.
+- `resolve_https_certs()` supports the generic `SSL_CERT_FILE` / `SSL_KEY_FILE` pair.
 - `shared_dayhoff_certs_dir()` respects `XDG_STATE_HOME`.
 - `source_env_file()` can load a simple `.env` file into `os.environ`, but only when downstream code calls it explicitly.
 
@@ -337,11 +337,14 @@ For user-facing output, use `cli_core_yo.output` instead of raw ANSI formatting:
 - `detail(msg)`
 - `bullet(msg)`
 - `print_text(msg)`
+- `print_rich(renderable)`
 - `emit_json(data)`
 
 Important behavior:
 
 - Human primitives are automatically suppressed when runtime JSON mode is enabled.
+- `print_text()` writes literal plain text directly to stdout, with no Rich markup interpretation or terminal wrapping.
+- `print_rich()` is the styled/renderable path for Rich markup or Rich objects.
 - `emit_json()` writes deterministic JSON:
   sorted keys, `indent=2`, UTF-8 passthrough, trailing newline, and no ANSI.
 - `NO_COLOR=1` disables ANSI styling in human output.
@@ -375,7 +378,8 @@ Use this for local HTTPS cert management in downstream service CLIs.
 
 - `ensure_certs(certs_dir)` ensures `cert.pem` and `key.pem`, generating them with `mkcert` when needed.
 - `resolve_https_certs(...)` resolves cert/key paths by precedence:
-  explicit paths, generic SSL env vars, caller-supplied legacy env vars, shared dir, fallback dir, then optional generation.
+  explicit paths, a complete `SSL_CERT_FILE` / `SSL_KEY_FILE` pair, shared dir, fallback dir, then optional generation.
+- If only one of `SSL_CERT_FILE` / `SSL_KEY_FILE` is set, `resolve_https_certs(...)` keeps checking configured directories and generation before raising a pair-specific env error.
 - `shared_dayhoff_certs_dir(deploy_name)` resolves the Dayhoff shared cert directory under XDG state.
 - `cert_status(certs_dir)` reports readiness and mkcert/CA status.
 

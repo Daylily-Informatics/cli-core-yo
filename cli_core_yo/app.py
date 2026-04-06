@@ -269,7 +269,7 @@ def _register_version(registry: CommandRegistry, spec: CliSpec) -> None:
         if json:
             output.emit_json({"app": spec.app_display_name, "version": version})
         else:
-            output.print_text(f"{spec.app_display_name} [cyan]{version}[/cyan]")
+            output.print_rich(f"{spec.app_display_name} [cyan]{version}[/cyan]")
 
     registry._reserved.discard("version")
     registry.add_command(None, "version", _version_callback, help_text="Show version.", order=0)
