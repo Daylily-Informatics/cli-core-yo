@@ -77,6 +77,28 @@ class TestResolveHttpsCerts:
 
         assert result == ResolvedHttpsCerts(env_cert, env_key, source="env")
 
+    def test_partial_generic_env_falls_through_to_shared_dir(self, tmp_path: Path):
+        shared_cert, shared_key = _write_pair(tmp_path / "shared")
+
+        result = resolve_https_certs(
+            env={"SSL_CERT_FILE": str(tmp_path / "ambient-cert.pem")},
+            shared_certs_dir=tmp_path / "shared",
+            generate_if_missing=False,
+        )
+
+        assert result == ResolvedHttpsCerts(shared_cert, shared_key, source="shared-dir")
+
+    def test_partial_generic_env_falls_through_to_fallback_dir(self, tmp_path: Path):
+        fallback_cert, fallback_key = _write_pair(tmp_path / "fallback")
+
+        result = resolve_https_certs(
+            env={"SSL_CERT_FILE": str(tmp_path / "ambient-cert.pem")},
+            fallback_certs_dir=tmp_path / "fallback",
+            generate_if_missing=False,
+        )
+
+        assert result == ResolvedHttpsCerts(fallback_cert, fallback_key, source="fallback-dir")
+
     def test_shared_dir_beats_fallback_dir(self, tmp_path: Path):
         shared_cert, shared_key = _write_pair(tmp_path / "shared")
         _write_pair(tmp_path / "fallback")
@@ -148,13 +170,41 @@ class TestResolveHttpsCerts:
 
         assert result == ResolvedHttpsCerts(expected_cert, expected_key, source="generated")
 
+    def test_partial_generic_env_allows_generation(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        expected_cert = tmp_path / "shared" / CERT_FILENAME
+        expected_key = tmp_path / "shared" / KEY_FILENAME
+
+        def fake_ensure(
+            certs_dir: Path,
+            *,
+            hosts: tuple[str, ...],
+            force: bool = False,
+        ) -> tuple[Path, Path]:
+            assert certs_dir == tmp_path / "shared"
+            assert hosts == ("localhost", "127.0.0.1", "::1")
+            assert force is False
+            return expected_cert, expected_key
+
+        monkeypatch.setattr("cli_core_yo.certs.ensure_certs", fake_ensure)
+
+        result = resolve_https_certs(
+            env={"SSL_CERT_FILE": str(tmp_path / "ambient-cert.pem")},
+            shared_certs_dir=tmp_path / "shared",
+        )
+
+        assert result == ResolvedHttpsCerts(expected_cert, expected_key, source="generated")
+
     def test_cli_requires_both_paths(self, tmp_path: Path):
         cert_path, _ = _write_pair(tmp_path / "cli")
 
         with pytest.raises(SystemExit, match="both cert and key"):
             resolve_https_certs(cert_path=cert_path)
 
-    def test_generic_env_requires_both_paths(self, tmp_path: Path):
+    def test_generic_env_requires_both_paths_when_no_later_source_resolves(self, tmp_path: Path):
         cert_path, _ = _write_pair(tmp_path / "env")
 
         with pytest.raises(SystemExit, match="SSL_CERT_FILE"):

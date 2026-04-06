@@ -135,6 +135,15 @@ class ResolvedHttpsCerts:
     source: str
 
 
+@dataclass(frozen=True)
+class _EnvPairResolution:
+    """Private result for env-driven cert/key pair resolution."""
+
+    cert_path: Path | None = None
+    key_path: Path | None = None
+    error: str | None = None
+
+
 def shared_dayhoff_certs_dir(
     deploy_name: str,
     *,
@@ -166,7 +175,7 @@ def resolve_https_certs(
 
     Resolution order:
     1. Explicit ``cert_path`` / ``key_path``
-    2. Generic env ``SSL_CERT_FILE`` / ``SSL_KEY_FILE``
+    2. Generic env ``SSL_CERT_FILE`` / ``SSL_KEY_FILE`` when both are present
     3. Existing files in ``shared_certs_dir``
     4. Existing files in ``fallback_certs_dir``
     5. Optional mkcert generation, preferring ``shared_certs_dir``
@@ -176,14 +185,15 @@ def resolve_https_certs(
     if resolved is not None:
         return _validated_paths(*resolved, source="cli")
 
-    resolved = _resolve_env_pair(
+    env_resolution = _resolve_env_pair(
         env_map,
         cert_env_vars=("SSL_CERT_FILE",),
         key_env_vars=("SSL_KEY_FILE",),
         source="generic SSL env",
     )
-    if resolved is not None:
-        return _validated_paths(*resolved, source="env")
+    incomplete_env_error = env_resolution.error
+    if env_resolution.cert_path is not None and env_resolution.key_path is not None:
+        return _validated_paths(env_resolution.cert_path, env_resolution.key_path, source="env")
 
     shared_dir = Path(shared_certs_dir).expanduser() if shared_certs_dir else None
     if shared_dir is not None:
@@ -200,6 +210,8 @@ def resolve_https_certs(
     if generate_if_missing:
         generation_dir = shared_dir or fallback_dir
         if generation_dir is None:
+            if incomplete_env_error is not None:
+                raise SystemExit(incomplete_env_error)
             raise SystemExit(
                 "HTTPS is enabled but no certificate source was configured. "
                 "Provide --cert/--key, set SSL_CERT_FILE and SSL_KEY_FILE, "
@@ -207,6 +219,9 @@ def resolve_https_certs(
             )
         cert_file, key_file = ensure_certs(generation_dir, hosts=hosts)
         return ResolvedHttpsCerts(cert_file, key_file, source="generated")
+
+    if incomplete_env_error is not None:
+        raise SystemExit(incomplete_env_error)
 
     raise SystemExit(
         "HTTPS certificates were not found. Provide --cert/--key, "
@@ -234,18 +249,24 @@ def _resolve_env_pair(
     cert_env_vars: tuple[str, ...],
     key_env_vars: tuple[str, ...],
     source: str,
-) -> tuple[Path, Path] | None:
+) -> _EnvPairResolution:
     cert_value = _first_env_value(env, cert_env_vars)
     key_value = _first_env_value(env, key_env_vars)
     if cert_value is None and key_value is None:
-        return None
+        return _EnvPairResolution()
     if cert_value is None or key_value is None:
         cert_names = ", ".join(cert_env_vars) or "<none>"
         key_names = ", ".join(key_env_vars) or "<none>"
-        raise SystemExit(
-            f"{source} must provide both a cert path ({cert_names}) and a key path ({key_names})."
+        return _EnvPairResolution(
+            error=(
+                f"{source} must provide both a cert path ({cert_names}) "
+                f"and a key path ({key_names})."
+            )
         )
-    return Path(cert_value).expanduser(), Path(key_value).expanduser()
+    return _EnvPairResolution(
+        cert_path=Path(cert_value).expanduser(),
+        key_path=Path(key_value).expanduser(),
+    )
 
 
 def _first_env_value(env: Mapping[str, str], names: tuple[str, ...]) -> str | None:

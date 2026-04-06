@@ -1,7 +1,7 @@
 """UX output primitives and JSON emitter (§6.1, §6.2, §2.8).
 
-All human output goes through Rich Console.
-JSON output bypasses Rich entirely.
+Styled human output goes through Rich Console.
+Literal plain-text output and JSON bypass Rich entirely.
 """
 
 from __future__ import annotations
@@ -105,10 +105,22 @@ def bullet(msg: str) -> None:
 
 
 def print_text(msg: Any) -> None:
-    """Print arbitrary text or Rich renderable through the console (respects NO_COLOR)."""
+    """Print literal plain text without Rich wrapping or markup interpretation."""
     if _is_json_mode():
         return
-    _get_console().print(msg)
+    text = str(msg)
+    if text.endswith("\n"):
+        sys.stdout.write(text)
+    else:
+        sys.stdout.write(text + "\n")
+    sys.stdout.flush()
+
+
+def print_rich(renderable: Any) -> None:
+    """Print a Rich markup string or renderable through the console."""
+    if _is_json_mode():
+        return
+    _get_console().print(renderable)
 
 
 # ── JSON emitter (§2.8) ─────────────────────────────────────────────────────
@@ -147,6 +159,7 @@ class CliOutput:
     detail = staticmethod(detail)
     bullet = staticmethod(bullet)
     print_text = staticmethod(print_text)
+    print_rich = staticmethod(print_rich)
     emit_json = staticmethod(emit_json)
     info = staticmethod(detail)  # alias
 

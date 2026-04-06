@@ -311,10 +311,6 @@ def _xdg_config_file(tmp_path: Path, relative_path: str = "config.json") -> Path
     return tmp_path / "config" / "test-app" / Path(relative_path)
 
 
-def _printed_path(text: str) -> Path:
-    return Path("".join(text.splitlines()))
-
-
 class TestVersionCommand:
     def test_version_human(self, minimal_spec, tmp_path, monkeypatch):
         app = _make_app(minimal_spec, tmp_path, monkeypatch)
@@ -398,22 +394,27 @@ class TestConfigGroup:
         app = _make_app(full_spec, tmp_path, monkeypatch)
         result = runner.invoke(app, ["config", "path"])
         assert result.exit_code == 0
-        assert _printed_path(result.output).resolve() == _xdg_config_file(tmp_path).resolve()
+        assert result.output == f"{_xdg_config_file(tmp_path)}\n"
 
     def test_config_path_absolute(self, absolute_full_spec, tmp_path, monkeypatch):
         app = _make_app(absolute_full_spec, tmp_path, monkeypatch)
         result = runner.invoke(app, ["config", "path"])
         assert result.exit_code == 0
-        printed_path = _printed_path(result.output)
-        assert printed_path.resolve() == (tmp_path / "absolute-config.json").resolve()
+        assert result.output == f"{tmp_path / 'absolute-config.json'}\n"
 
     def test_config_path_nested_relative(self, nested_relative_full_spec, tmp_path, monkeypatch):
         app = _make_app(nested_relative_full_spec, tmp_path, monkeypatch)
         result = runner.invoke(app, ["config", "path"])
         assert result.exit_code == 0
-        assert _printed_path(result.output).resolve() == _xdg_config_file(
-            tmp_path, "profiles/dev/config.json"
-        ).resolve()
+        assert result.output == f"{_xdg_config_file(tmp_path, 'profiles/dev/config.json')}\n"
+
+    def test_config_path_nested_relative_does_not_wrap_on_narrow_terminal(
+        self, nested_relative_full_spec, tmp_path, monkeypatch
+    ):
+        app = _make_app(nested_relative_full_spec, tmp_path, monkeypatch)
+        result = runner.invoke(app, ["config", "path"], terminal_width=20)
+        assert result.exit_code == 0
+        assert result.output == f"{_xdg_config_file(tmp_path, 'profiles/dev/config.json')}\n"
 
     def test_config_init_creates_file(self, full_spec, tmp_path, monkeypatch):
         app = _make_app(full_spec, tmp_path, monkeypatch)
@@ -636,7 +637,7 @@ class TestConfigGroup:
 
         result = runner.invoke(app, ["config", "path"])
         assert result.exit_code == 0
-        assert _printed_path(result.output).resolve() == config_file.resolve()
+        assert result.output == f"{config_file}\n"
 
         result = runner.invoke(app, ["config", "init"])
         assert result.exit_code == 0
@@ -695,7 +696,7 @@ class TestConfigGroup:
 
         result = runner.invoke(app, ["config", "path"])
         assert result.exit_code == 0
-        assert _printed_path(result.output).resolve() == config_file.resolve()
+        assert result.output == f"{config_file}\n"
 
         result = runner.invoke(app, ["config", "init"])
         assert result.exit_code == 0
@@ -734,7 +735,7 @@ class TestConfigGroup:
 
         result = runner.invoke(app, ["config", "path"])
         assert result.exit_code == 0
-        assert _printed_path(result.output).resolve() == config_file.resolve()
+        assert result.output == f"{config_file}\n"
 
         result = runner.invoke(app, ["config", "init"])
         assert result.exit_code == 0
@@ -748,7 +749,7 @@ class TestConfigGroup:
         result = runner.invoke(app, ["--config", str(override_path), "config", "path"])
 
         assert result.exit_code == 0
-        assert _printed_path(result.output).resolve() == override_path.resolve()
+        assert result.output == f"{override_path}\n"
 
     def test_root_config_override_relative_path_resolves_from_cwd(
         self, full_spec, tmp_path, monkeypatch
@@ -761,7 +762,7 @@ class TestConfigGroup:
         result = runner.invoke(app, ["--config", "./override.json", "config", "path"])
 
         assert result.exit_code == 0
-        assert _printed_path(result.output).resolve() == (cwd / "override.json").resolve()
+        assert result.output == f"{cwd / 'override.json'}\n"
 
     def test_root_config_override_parent_relative_path_resolves_from_cwd(
         self, full_spec, tmp_path, monkeypatch
@@ -774,7 +775,7 @@ class TestConfigGroup:
         result = runner.invoke(app, ["--config", "../override.json", "config", "path"])
 
         assert result.exit_code == 0
-        assert _printed_path(result.output).resolve() == (cwd.parent / "override.json").resolve()
+        assert result.output == f"{cwd.parent / 'override.json'}\n"
 
     def test_root_config_override_expands_tilde(self, full_spec, tmp_path, monkeypatch):
         app = _make_app(full_spec, tmp_path, monkeypatch)
@@ -784,7 +785,7 @@ class TestConfigGroup:
         result = runner.invoke(app, ["--config", "~/override.json", "config", "path"])
 
         assert result.exit_code == 0
-        assert _printed_path(result.output).resolve() == override_path.resolve()
+        assert result.output == f"{override_path}\n"
 
     def test_root_config_override_init_uses_override(self, full_spec, tmp_path, monkeypatch):
         app = _make_app(full_spec, tmp_path, monkeypatch)
@@ -808,8 +809,8 @@ class TestConfigGroup:
 
         assert first.exit_code == 0
         assert second.exit_code == 0
-        assert _printed_path(first.output).resolve() == override_path.resolve()
-        assert _printed_path(second.output).resolve() == _xdg_config_file(tmp_path).resolve()
+        assert first.output == f"{override_path}\n"
+        assert second.output == f"{_xdg_config_file(tmp_path)}\n"
 
     def test_root_config_override_available_to_downstream_command_via_create_app(
         self, full_spec, tmp_path, monkeypatch
@@ -829,7 +830,7 @@ class TestConfigGroup:
         result = runner.invoke(app, ["--config", str(override_path), "show-context"])
 
         assert result.exit_code == 0
-        assert _printed_path(result.output).resolve() == override_path.resolve()
+        assert result.output == f"{override_path}\n"
 
 
 # ── Env group tests ─────────────────────────────────────────────────────────
@@ -937,7 +938,7 @@ class TestRun:
         assert run(full_spec, ["--config", str(override_path), "show-context"]) == 0
 
         out = capsys.readouterr().out
-        assert _printed_path(out).resolve() == override_path.resolve()
+        assert out == f"{override_path}\n"
 
     def test_run_initializes_runtime_without_config_path_when_config_disabled(
         self, minimal_spec, tmp_path, monkeypatch, capsys
@@ -1471,6 +1472,7 @@ class TestPublicAPI:
             output.detail,
             output.bullet,
             output.print_text,
+            output.print_rich,
             output.emit_json,
         ]
         assert all(callable(p) for p in primitives)
