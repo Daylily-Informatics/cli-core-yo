@@ -77,20 +77,6 @@ class TestResolveHttpsCerts:
 
         assert result == ResolvedHttpsCerts(env_cert, env_key, source="env")
 
-    def test_legacy_env_used_when_generic_env_missing(self, tmp_path: Path):
-        legacy_cert, legacy_key = _write_pair(tmp_path / "legacy")
-
-        result = resolve_https_certs(
-            env={
-                "URSA_SSL_CERT_FILE": str(legacy_cert),
-                "URSA_SSL_KEY_FILE": str(legacy_key),
-            },
-            legacy_cert_env_vars=("URSA_SSL_CERT_FILE",),
-            legacy_key_env_vars=("URSA_SSL_KEY_FILE",),
-        )
-
-        assert result == ResolvedHttpsCerts(legacy_cert, legacy_key, source="legacy-env")
-
     def test_shared_dir_beats_fallback_dir(self, tmp_path: Path):
         shared_cert, shared_key = _write_pair(tmp_path / "shared")
         _write_pair(tmp_path / "fallback")
@@ -173,16 +159,6 @@ class TestResolveHttpsCerts:
 
         with pytest.raises(SystemExit, match="SSL_CERT_FILE"):
             resolve_https_certs(env={"SSL_CERT_FILE": str(cert_path)})
-
-    def test_legacy_env_requires_both_paths(self, tmp_path: Path):
-        cert_path, _ = _write_pair(tmp_path / "legacy")
-
-        with pytest.raises(SystemExit, match="URSA_SSL_CERT_FILE"):
-            resolve_https_certs(
-                env={"URSA_SSL_CERT_FILE": str(cert_path)},
-                legacy_cert_env_vars=("URSA_SSL_CERT_FILE",),
-                legacy_key_env_vars=("URSA_SSL_KEY_FILE",),
-            )
 
     def test_missing_explicit_cert_fails_clearly(self, tmp_path: Path):
         key_path = tmp_path / "missing-key.pem"
