@@ -5,11 +5,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import mktestdocs.__main__ as mktestdocs_main
-from mktestdocs import check_md_file
+import pytest
 
 
 def test_readme_python_examples(monkeypatch, tmp_path):
+    pytest.importorskip("mktestdocs")
+    mktestdocs_main = pytest.importorskip("mktestdocs.__main__")
+    from mktestdocs import check_md_file
+
     def exec_python_allowing_successful_exit(source: str) -> None:
         try:
             exec(source, {"__name__": "__main__"})

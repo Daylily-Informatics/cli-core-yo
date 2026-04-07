@@ -7,6 +7,32 @@ class CliCoreYoError(Exception):
     """Base exception for all cli-core-yo framework errors."""
 
     exit_code: int = 1
+    error_code: str = "cli_core_yo_error"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        details: object | None = None,
+        json_mode: bool | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.details = details
+        self.json_mode = json_mode
+
+
+class ContractViolationError(CliCoreYoError):
+    """Raised when the invocation violates the framework contract."""
+
+    exit_code = 2
+    error_code = "contract_violation"
+
+
+class RuntimeValidationError(CliCoreYoError):
+    """Raised when runtime enforcement blocks command execution."""
+
+    exit_code = 3
+    error_code = "runtime_validation_failed"
 
 
 class ContextNotInitializedError(CliCoreYoError):

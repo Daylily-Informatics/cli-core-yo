@@ -1,97 +1,64 @@
-"""Deterministic plugin discovery and loading (§4.4).
-
-Plugin callable signature: (registry: CommandRegistry, spec: CliSpec) -> None
-
-Loading order:
-1. spec.plugins.explicit — import paths loaded in list order
-2. spec.plugins.entry_points — entry-point names loaded in list order
-
-Entry point group: cli_core_yo.plugins
-"""
+"""Deterministic plugin discovery and loading for cli-core-yo v2."""
 
 from __future__ import annotations
 
 import importlib
 from importlib.metadata import entry_points
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
-from cli_core_yo.output import ccyo_out
 from cli_core_yo.errors import PluginLoadError
 
 if TYPE_CHECKING:
     from cli_core_yo.registry import CommandRegistry
     from cli_core_yo.spec import CliSpec
 
-# Entry-point group name (§4.4)
 _EP_GROUP = "cli_core_yo.plugins"
 
 
-def load_plugins(
-    registry: CommandRegistry,
-    spec: CliSpec,
-) -> None:
-    """Load all plugins defined in spec.plugins, in deterministic order.
-
-    Explicit plugins first, then entry-point plugins.
-    Raises PluginLoadError on import failure or registration exception.
-    """
-    plugin_spec = spec.plugins
-
-    # Phase 1: explicit plugins (import-path strings)
-    for import_path in plugin_spec.explicit:
+def load_plugins(registry: "CommandRegistry", spec: "CliSpec") -> None:
+    """Load explicit plugins first, then named entry-point plugins."""
+    for import_path in spec.plugins.explicit:
         _load_explicit(import_path, registry, spec)
-
-    # Phase 2: entry-point plugins
-    for ep_name in plugin_spec.entry_points:
-        _load_entry_point(ep_name, registry, spec)
+    for entry_point_name in spec.plugins.entry_points:
+        _load_entry_point(entry_point_name, registry, spec)
 
 
-def _load_explicit(
-    import_path: str,
-    registry: CommandRegistry,
-    spec: CliSpec,
-) -> None:
-    """Import and invoke a single explicit plugin callable."""
+def _load_explicit(import_path: str, registry: "CommandRegistry", spec: "CliSpec") -> None:
     try:
         module_path, _, attr_name = import_path.rpartition(".")
-        if not module_path:
-            raise ImportError(f"Invalid import path: '{import_path}' (no module component)")
+        if not module_path or not attr_name:
+            raise ImportError(f"Invalid import path '{import_path}'")
         module = importlib.import_module(module_path)
-        callable_ = getattr(module, attr_name)
-    except Exception as exc:
-        ccyo_out.error(f"Plugin '{import_path}': {exc}")
+        plugin = getattr(module, attr_name)
+    except Exception as exc:  # pragma: no cover - exact import failures vary by runtime
         raise PluginLoadError(import_path, str(exc)) from exc
-
-    try:
-        callable_(registry, spec)
-    except PluginLoadError:
-        raise
-    except Exception as exc:
-        ccyo_out.error(f"Plugin '{import_path}' raised: {exc}")
-        raise PluginLoadError(import_path, str(exc)) from exc
+    _invoke_plugin(plugin, import_path, registry, spec)
 
 
 def _load_entry_point(
-    ep_name: str,
-    registry: CommandRegistry,
-    spec: CliSpec,
+    entry_point_name: str,
+    registry: "CommandRegistry",
+    spec: "CliSpec",
 ) -> None:
-    """Discover and invoke a single entry-point plugin by name."""
     try:
-        eps = entry_points(group=_EP_GROUP, name=ep_name)
-        matches = list(eps)
+        matches = list(entry_points(group=_EP_GROUP, name=entry_point_name))
         if not matches:
-            raise ImportError(f"No entry point '{ep_name}' in group '{_EP_GROUP}'")
-        # Use the first match (deterministic: name is unique per dist)
-        callable_ = matches[0].load()
-    except Exception as exc:
-        ccyo_out.error(f"Entry-point plugin '{ep_name}': {exc}")
-        raise PluginLoadError(ep_name, str(exc)) from exc
+            raise ImportError(f"No entry point '{entry_point_name}' in group '{_EP_GROUP}'")
+        plugin = matches[0].load()
+    except Exception as exc:  # pragma: no cover - exact import failures vary by runtime
+        raise PluginLoadError(entry_point_name, str(exc)) from exc
+    _invoke_plugin(plugin, entry_point_name, registry, spec)
 
+
+def _invoke_plugin(
+    plugin: Callable[["CommandRegistry", "CliSpec"], None],
+    plugin_name: str,
+    registry: "CommandRegistry",
+    spec: "CliSpec",
+) -> None:
     try:
-        callable_(registry, spec)
+        plugin(registry, spec)
     except PluginLoadError:
         raise
     except Exception as exc:
-        ccyo_out.error(f"Entry-point plugin '{ep_name}' raised: {exc}")
-        raise PluginLoadError(ep_name, str(exc)) from exc
+        raise PluginLoadError(plugin_name, str(exc)) from exc

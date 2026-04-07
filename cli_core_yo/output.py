@@ -1,155 +1,206 @@
-"""UX output primitives and JSON emitter (§6.1, §6.2, §2.8).
-
-Styled human output goes through Rich Console.
-Literal plain-text output and JSON bypass Rich entirely.
-"""
+"""UX output primitives for v2 stdout/stderr and JSON contracts."""
 
 from __future__ import annotations
 
 import json
 import os
 import sys
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterable
 
 from rich.console import Console
 
-# Module-level console — lazy-initialized to respect NO_COLOR at call time.
 _console: Console | None = None
 
 
-def _get_console() -> Console:
-    """Return a Console that writes to the *current* sys.stdout.
-
-    A fresh Console is created each call so that test harnesses (e.g.
-    Typer's CliRunner) that temporarily replace sys.stdout always
-    receive the output.
-    """
-    no_color = "NO_COLOR" in os.environ
-    return Console(
-        file=sys.stdout,
-        highlight=False,
-        no_color=no_color,
-        stderr=False,
-    )
-
-
 def _reset_console() -> None:
-    """Reset the console (test-only)."""
+    """Reset cached console state for tests."""
     global _console
     _console = None
 
 
-def _is_json_mode() -> bool:
-    """Check if the current invocation is in JSON mode."""
+def _current_context() -> Any | None:
     try:
         from cli_core_yo.runtime import get_context
 
-        return get_context().json_mode
+        return get_context()
     except Exception:
-        return False
+        return None
 
 
-# ── Human output primitives (§6.2) ──────────────────────────────────────────
+def _is_json_mode() -> bool:
+    ctx = _current_context()
+    return bool(getattr(ctx, "json_mode", False)) if ctx is not None else False
+
+
+def _no_color_enabled() -> bool:
+    ctx = _current_context()
+    if ctx is not None and getattr(ctx, "no_color", False):
+        return True
+    return "NO_COLOR" in os.environ
+
+
+def _console_for(stream: Any) -> Console:
+    return Console(
+        file=stream,
+        highlight=False,
+        no_color=_no_color_enabled(),
+        stderr=stream is sys.stderr,
+    )
+
+
+def _write_stdout(text: str) -> None:
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
+def _write_stderr(text: str) -> None:
+    sys.stderr.write(text)
+    sys.stderr.flush()
+
+
+def _render_console(stream: Any, renderable: Any) -> None:
+    _console_for(stream).print(renderable)
+
+
+def _json_dump(data: Any) -> str:
+    return json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False)
+
+
+def _json_ready(data: Any) -> Any:
+    if isinstance(data, dict):
+        return {str(key): _json_ready(value) for key, value in data.items()}
+    if isinstance(data, (list, tuple)):
+        return [_json_ready(value) for value in data]
+    if isinstance(data, set):
+        return sorted(_json_ready(value) for value in data)
+    if isinstance(data, Path):
+        return str(data)
+    if data is None or isinstance(data, (str, int, float, bool)):
+        return data
+    if hasattr(data, "__dict__") and not isinstance(data, type):
+        return {
+            str(key): _json_ready(value)
+            for key, value in vars(data).items()
+            if not str(key).startswith("_")
+        }
+    return str(data)
 
 
 def heading(title: str) -> None:
-    """Print a section heading: blank line, bold cyan title, blank line."""
     if _is_json_mode():
         return
-    con = _get_console()
-    con.print()
-    con.print(f"[bold cyan]{title}[/bold cyan]")
-    con.print()
+    _render_console(sys.stdout, f"\n[bold cyan]{title}[/bold cyan]\n")
 
 
 def success(msg: str) -> None:
-    """Print a success line: ✓ prefix in green."""
     if _is_json_mode():
         return
-    _get_console().print(f"[green]✓[/green] {msg}")
+    _render_console(sys.stdout, f"[green]✓[/green] {msg}")
 
 
 def warning(msg: str) -> None:
-    """Print a warning line: ⚠ prefix in yellow."""
-    if _is_json_mode():
-        return
-    _get_console().print(f"[yellow]⚠[/yellow] {msg}")
+    _render_console(sys.stderr, f"[yellow]⚠[/yellow] {msg}")
 
 
 def error(msg: str) -> None:
-    """Print an error line: ✗ prefix in red."""
-    if _is_json_mode():
-        return
-    _get_console().print(f"[red]✗[/red] {msg}")
+    _render_console(sys.stderr, f"[red]✗[/red] {msg}")
 
 
 def action(msg: str) -> None:
-    """Print an action line: → prefix in cyan."""
     if _is_json_mode():
         return
-    _get_console().print(f"[cyan]→[/cyan] {msg}")
+    _render_console(sys.stdout, f"[cyan]→[/cyan] {msg}")
 
 
 def detail(msg: str) -> None:
-    """Print an indented detail line (3-space indent)."""
     if _is_json_mode():
         return
-    _get_console().print(f"   {msg}")
+    _render_console(sys.stdout, f"   {msg}")
 
 
 def bullet(msg: str) -> None:
-    """Print a bullet detail line (3-space indent + •)."""
     if _is_json_mode():
         return
-    _get_console().print(f"   • {msg}")
+    _render_console(sys.stdout, f"   • {msg}")
 
 
 def print_text(msg: Any) -> None:
-    """Print literal plain text without Rich wrapping or markup interpretation."""
     if _is_json_mode():
         return
     text = str(msg)
-    if text.endswith("\n"):
-        sys.stdout.write(text)
-    else:
-        sys.stdout.write(text + "\n")
-    sys.stdout.flush()
+    _write_stdout(text if text.endswith("\n") else f"{text}\n")
 
 
 def print_rich(renderable: Any) -> None:
-    """Print a Rich markup string or renderable through the console."""
     if _is_json_mode():
         return
-    _get_console().print(renderable)
+    _render_console(sys.stdout, renderable)
 
 
-# ── JSON emitter (§2.8) ─────────────────────────────────────────────────────
+def debug(msg: str) -> None:
+    ctx = _current_context()
+    if ctx is None and "CLI_CORE_YO_DEBUG" not in os.environ:
+        return
+    if ctx is not None and not getattr(ctx, "debug", False):
+        return
+    _render_console(sys.stderr, f"[dim]debug[/dim] {msg}")
 
 
 def emit_json(data: Any) -> None:
-    """Write deterministic JSON to stdout, bypassing Rich.
-
-    - indent=2, sort_keys=True, ensure_ascii=False
-    - Trailing newline
-    - No ANSI codes
-    """
-    text = json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False)
-    sys.stdout.write(text + "\n")
-    sys.stdout.flush()
+    _write_stdout(_json_dump(_json_ready(data)) + "\n")
 
 
-# ── Singleton output object ───────────────────────────────────────────────────
+def emit_error_json(code: str, message: str, details: Any | None = None) -> None:
+    payload = {
+        "error": {
+            "code": code,
+            "details": _json_ready(details),
+            "message": message,
+        }
+    }
+    emit_json(payload)
+
+
+def emit_prereq_report(
+    results: Iterable[Any],
+    *,
+    heading_text: str = "Prerequisite report",
+) -> None:
+    results_list = list(results)
+    from cli_core_yo.runtime_checks import (
+        prereq_report_payload,
+        prereq_result_as_dict,
+        summarize_prereq_results,
+    )
+
+    if _is_json_mode():
+        emit_json(prereq_report_payload(results_list))
+        return
+
+    summary = summarize_prereq_results(results_list)
+    heading(heading_text)
+    detail(
+        "Summary: "
+        f"{summary['pass']} pass, {summary['warn']} warn, "
+        f"{summary['fail']} fail, {summary['skip']} skip"
+    )
+    for result in results_list:
+        row = prereq_result_as_dict(result)
+        status = str(row["status"] or "skip")
+        line = f"{row['key']}: {row['summary']}"
+        if row["detail"]:
+            line = f"{line} ({row['detail']})"
+        if status == "pass":
+            success(line)
+        elif status == "skip":
+            detail(line)
+        else:
+            warning(line)
 
 
 class CliOutput:
-    """Collision-safe wrapper around the output module functions.
-
-    Usage::
-
-        from cli_core_yo import ccyo_out
-        ccyo_out.info("hello")
-        ccyo_out.error("oops")
-    """
+    """Wrapper exposing the module-level output helpers."""
 
     heading = staticmethod(heading)
     success = staticmethod(success)
@@ -161,7 +212,10 @@ class CliOutput:
     print_text = staticmethod(print_text)
     print_rich = staticmethod(print_rich)
     emit_json = staticmethod(emit_json)
-    info = staticmethod(detail)  # alias
+    emit_error_json = staticmethod(emit_error_json)
+    emit_prereq_report = staticmethod(emit_prereq_report)
+    debug = staticmethod(debug)
+    info = staticmethod(detail)
 
 
 ccyo_out = CliOutput()
