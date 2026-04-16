@@ -51,7 +51,7 @@
 Immutable dataclasses (all `frozen=True`):
 
 - `XdgSpec`: `app_dir_name: str`, `legacy_macos_config_dir: str | None`, `legacy_copy_files: list[str]`
-- `ConfigSpec`: `primary_filename: str`, `template_bytes: bytes | None`, `template_resource: tuple[str, str] | None`, `validator: Callable | None`
+- `ConfigSpec`: `xdg_relative_path: str | None`, `absolute_path: str | Path | None`, `template_bytes: bytes | None`, `template_resource: tuple[str, str] | None`, `validator: Callable[[str], list[str]] | None`
 - `EnvSpec`: `active_env_var: str`, `project_root_env_var: str`, `activate_script_name: str`, `deactivate_script_name: str`
 - `PluginSpec`: `explicit: list[str]`, `entry_points: list[str]`
 - `CliSpec`: `prog_name: str`, `app_display_name: str`, `dist_name: str`, `root_help: str`, `xdg: XdgSpec`, `config: ConfigSpec | None`, `env: EnvSpec | None`, `plugins: PluginSpec`, `info_hooks: list[Callable]`
