@@ -142,6 +142,26 @@ class CommandRegistry:
         key = tuple(path.split("/")) if isinstance(path, str) else path
         return self._commands.get(key)
 
+    def command_registrations(self) -> tuple[CommandRegistration, ...]:
+        """Return a deterministic snapshot of registered commands."""
+
+        return tuple(sorted(self._commands.values(), key=lambda command: command.path))
+
+    def group_paths(self) -> tuple[tuple[str, ...], ...]:
+        """Return a deterministic snapshot of registered group paths."""
+
+        paths: list[tuple[str, ...]] = []
+
+        def visit(nodes: dict[str, _Node]) -> None:
+            for node in nodes.values():
+                if node.kind != _NodeKind.GROUP:
+                    continue
+                paths.append(node.path)
+                visit(node.children)
+
+        visit(self._roots)
+        return tuple(sorted(paths))
+
     def resolve_command_args(self, argv: list[str]) -> CommandRegistration | None:
         node_dict = self._roots
         matched: tuple[str, ...] = ()

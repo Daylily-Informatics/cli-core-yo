@@ -965,6 +965,16 @@ def _reserved_option_flags(spec: CliSpec, output_spec: OutputSpec) -> set[str]:
     return flags
 
 
+def root_option_flags(spec: CliSpec) -> tuple[str, ...]:
+    """Return the complete deterministic root-option surface for ``spec``."""
+
+    flags = _reserved_option_flags(spec, _effective_output_spec(spec))
+    if spec.context is not None:
+        for option in spec.context.options:
+            flags.update(option.option_flags)
+    return tuple(sorted(flags))
+
+
 def _emit_framework_error(exc: CliCoreYoError) -> None:
     json_mode = bool(getattr(exc, "json_mode", False))
     if json_mode:
