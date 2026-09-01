@@ -48,6 +48,17 @@ class TestCommandRegistry:
         assert command.path == ("admin", "users", "list")
         assert command.policy is policy
 
+    def test_surface_snapshots_are_deterministic(self) -> None:
+        registry = CommandRegistry()
+        registry.add_command(None, "version", _callback, policy=CommandPolicy())
+        registry.add_command("admin/users", "list", _callback, policy=CommandPolicy())
+
+        assert registry.group_paths() == (("admin",), ("admin", "users"))
+        assert [command.path for command in registry.command_registrations()] == [
+            ("admin", "users", "list"),
+            ("version",),
+        ]
+
     def test_invalid_name_rejected(self) -> None:
         registry = CommandRegistry()
         with pytest.raises(ValueError, match="Invalid command name"):

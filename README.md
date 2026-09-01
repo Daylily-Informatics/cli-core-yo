@@ -161,6 +161,42 @@ The helper module is intentionally small and generic:
 - `assert_no_ansi(text)`
 - `assert_stdout_only(result)`
 
+## CLI Syntax Validation (Opt-In)
+
+Downstream test suites and CI jobs can validate a declared command surface
+without changing app construction or runtime behavior. `create_app()` and
+`run()` never invoke this validator automatically.
+
+```python
+from cli_core_yo.validation import (
+    CliSyntaxValidationConfig,
+    CommandPolicyExpectation,
+    validate_cli,
+)
+
+report = validate_cli(
+    app,
+    CliSyntaxValidationConfig(
+        required_root_flags=("--json", "--dry-run"),
+        required_commands=("version", "info"),
+        policy_expectations={
+            "version": CommandPolicyExpectation(
+                supports_json=True,
+                runtime_guard="exempt",
+            )
+        },
+        mode="fail",
+    ),
+)
+assert report.is_valid
+assert report.exit_code == 0
+```
+
+`report.to_dict()` returns a machine-readable command tree and finding list for
+CI output. Use `mode="warn"` during migration to retain findings while keeping
+the report exit code at zero. Intentional, temporary deviations can be declared
+with `FindingAllowance`; they remain in the report but do not fail the gate.
+
 ## Development
 
 Bootstrap a local environment from the repo root:
